@@ -1,0 +1,239 @@
+// LingoShorts — Prisma schema
+// Design principle: LANGUAGE IS DATA, NOT CODE.
+// Every content/user row carries language fields, so adding a new language is a
+// config + content change, never a schema rewrite.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Level {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum AudioStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+enum SubscriptionPlan {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  EXPIRED
+  PENDING
+}
+
+enum SpeakingSource {
+  TRIAL // consumed a free lifetime credit
+  AD // consumed a rewarded-ad credit
+  SUBSCRIPTION // covered by an active paid plan
+}
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String  @id @default(uuid())
+  email        String  @unique
+  passwordHash String
+  name         String?
+  role         Role    @default(USER)
+
+  // Language preferences (the scalability hinge).
+  // nativeLanguage  -> language vocab meanings are shown in
+  // targetLanguage  -> language the user is learning
+  nativeLanguage String @default("hi") // ISO code, e.g. "hi", "en", "es"
+  targetLanguage String @default("en")
+
+  // Streak tracking
+  currentStreak    Int       @default(0)
+  longestStreak    Int       @default(0)
+  lastActivityDate DateTime? @db.Date
+
+  // Entitlements
+  freeSpeakingCreditsRemaining Int       @default(3) // the "taste" before paywall
+  adCreditsRemaining           Int       @default(0) // earned via rewarded ads
+  adCreditsGrantedDate         DateTime? @db.Date // for daily ad-credit reset
+
+  notificationsReadAt DateTime?
+  savedCards       SavedCard[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription     Subscription?
+  refreshTokens    RefreshToken[]
+  completions      CardCompletion[]
+  speakingAttempts SpeakingAttempt[]
+
+  @@index([targetLanguage])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Content — the Inshorts-style cards
+// ---------------------------------------------------------------------------
+
+model Card {
+  id             String      @id @default(uuid())
+  targetLanguage String // language this card teaches, e.g. "en"
+  level          Level       @default(BEGINNER)
+  topic          String? // e.g. "interview", "daily life", "travel"
+  title          String
+  body           String // the short text (~60-120 words)
+  wordCount      Int         @default(0)
+  audioUrl       String? // cached TTS output (listening feature)
+  audioStatus    AudioStatus @default(PENDING)
+  isPublished    Boolean     @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Per-native-language glossaries: a single card can carry vocab meanings
+  // in many native languages without any schema change.
+  vocab       VocabEntry[]
+  completions CardCompletion[]
+  attempts    SpeakingAttempt[]
+
+  savedBy     SavedCard[]
+
+  @@index([targetLanguage, level, isPublished])
+}
+
+
+model SavedCard {
+  id        String   @id @default(uuid())
+  userId    String
+  cardId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cardId])
+  @@index([userId, createdAt])
+}
+
+// One row per event (NOT per user). Combined with each user's
+// notificationsReadAt timestamp, this gives everyone an unread badge
+// without fanning out a row per user.
+model Notification {
+  id        String   @id @default(uuid())
+  type      String   @default("NEW_CARD") // NEW_CARD | ANNOUNCEMENT | ...
+  title     String
+  body      String?
+  cardId    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model VocabEntry {
+  id             String  @id @default(uuid())
+  cardId         String
+  nativeLanguage String // language the meaning is written in, e.g. "hi"
+  term           String // the complex word from the card
+  partOfSpeech   String?
+  meaning        String // definition/translation in nativeLanguage
+  example        String?
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, nativeLanguage, term])
+  @@index([cardId, nativeLanguage])
+}
+
+// ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+
+model CardCompletion {
+  id          String   @id @default(uuid())
+  userId      String
+  cardId      String
+  readDone    Boolean  @default(false)
+  listenDone  Boolean  @default(false)
+  completedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cardId])
+  @@index([userId])
+}
+
+model SpeakingAttempt {
+  id                String         @id @default(uuid())
+  userId            String
+  cardId            String
+  source            SpeakingSource
+  // Scores from the pronunciation assessment (0-100)
+  overallScore      Float?
+  accuracyScore     Float?
+  fluencyScore      Float?
+  completenessScore Float?
+  prosodyScore      Float?
+  transcript        String?
+  wordScores        Json? // per-word breakdown for "what you did right/wrong"
+  audioUrl          String?
+  createdAt         DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+model Subscription {
+  id              String             @id @default(uuid())
+  userId          String             @unique
+  plan            SubscriptionPlan
+  status          SubscriptionStatus @default(PENDING)
+  provider        String             @default("razorpay")
+  providerOrderId String?
+  providerRefId   String? // payment id / subscription id
+  currentPeriodEnd DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
