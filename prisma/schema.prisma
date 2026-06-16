@@ -280,3 +280,16 @@ model GrammarLesson {
 
   @@index([order])
 }
+
+
+model SponsoredCard {
+  id         String   @id @default(cuid())
+  advertiser String
+  title      String
+  body       String
+  ctaText    String   @default("Learn more")
+  ctaUrl     String
+  imageUrl   String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}

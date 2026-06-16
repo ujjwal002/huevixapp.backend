@@ -4,6 +4,8 @@ import userRoutes from './user.routes.js';
 import cardRoutes from './card.routes.js';
 import vocabRoutes from './vocab.routes.js';
 import grammarRoutes from './grammar.routes.js';
+import sponsoredRoutes from './sponsored.routes.js';
+
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
 import {
   SUPPORTED_LANGUAGES,
@@ -37,5 +39,7 @@ router.use('/notifications', notificationRouter);
 
 router.use('/vocab', vocabRoutes);
 router.use('/grammar', grammarRoutes);
+
+router.use('/sponsored', sponsoredRoutes);
 
 export default router;

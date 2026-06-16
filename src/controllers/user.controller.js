@@ -46,6 +46,7 @@ export const getStats = asyncHandler(async (req, res) => {
 
 export const getLeaderboard = asyncHandler(async (req, res) => {
   const top = await prisma.user.findMany({
+    where: { role: { not: 'ADMIN' } },        // <-- hide admin accounts
     orderBy: [{ longestStreak: 'desc' }, { currentStreak: 'desc' }],
     take: 5,
     select: { id: true, name: true, currentStreak: true, longestStreak: true },
