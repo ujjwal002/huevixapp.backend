@@ -43,3 +43,20 @@ export const getStats = asyncHandler(async (req, res) => {
     entitlement,
   });
 });
+
+export const getLeaderboard = asyncHandler(async (req, res) => {
+  const top = await prisma.user.findMany({
+    orderBy: [{ longestStreak: 'desc' }, { currentStreak: 'desc' }],
+    take: 5,
+    select: { id: true, name: true, currentStreak: true, longestStreak: true },
+  });
+  res.json({
+    items: top.map((u, i) => ({
+      rank: i + 1,
+      name: u.name || 'Learner',
+      currentStreak: u.currentStreak,
+      longestStreak: u.longestStreak,
+      isMe: u.id === req.user.id,
+    })),
+  });
+});

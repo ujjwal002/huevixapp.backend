@@ -2,6 +2,8 @@ import { Router } from 'express';
 import authRoutes from './auth.routes.js';
 import userRoutes from './user.routes.js';
 import cardRoutes from './card.routes.js';
+import vocabRoutes from './vocab.routes.js';
+import grammarRoutes from './grammar.routes.js';
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
 import {
   SUPPORTED_LANGUAGES,
@@ -32,5 +34,8 @@ router.use('/speaking', speakingRouter);
 router.use('/ads', adsRouter);
 router.use('/subscription', subRouter);
 router.use('/notifications', notificationRouter);
+
+router.use('/vocab', vocabRoutes);
+router.use('/grammar', grammarRoutes);
 
 export default router;

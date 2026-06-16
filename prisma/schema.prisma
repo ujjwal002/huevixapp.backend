@@ -88,6 +88,7 @@ model User {
   refreshTokens    RefreshToken[]
   completions      CardCompletion[]
   speakingAttempts SpeakingAttempt[]
+  vocabProgress VocabProgress[]
 
   @@index([targetLanguage])
 }
@@ -236,4 +237,46 @@ model Subscription {
   updatedAt       DateTime           @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+
+model VocabWord {
+  id           String          @id @default(cuid())
+  word         String          @unique
+  rank         Int
+  ladder       Int
+  partOfSpeech String?
+  meaning      String
+  translation  String?
+  example      String?
+  createdAt    DateTime        @default(now())
+  progress     VocabProgress[]
+
+  @@index([ladder])
+}
+
+model VocabProgress {
+  id        String    @id @default(cuid())
+  userId    String
+  wordId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word      VocabWord @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  learnedAt DateTime  @default(now())
+
+  @@unique([userId, wordId])
+}
+
+
+model GrammarLesson {
+  id          String   @id @default(cuid())
+  level       String
+  order       Int
+  title       String   @unique
+  summary     String
+  explanation String?
+  examples    Json?
+  tips        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([order])
 }

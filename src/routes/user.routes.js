@@ -11,4 +11,6 @@ router.get('/me', user.getMe);
 router.patch('/me', validate(updateMeSchema), user.updateMe);
 router.get('/me/stats', user.getStats);
 
+router.get('/leaderboard', user.getLeaderboard);
+
 export default router;
