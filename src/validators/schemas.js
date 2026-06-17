@@ -102,3 +102,16 @@ export const verifyPaymentSchema = {
     signature: z.string().min(1),
   }),
 };
+
+// News → article: admin pastes the article text + uploads an image (multipart).
+export const createArticleSchema = {
+  body: z.object({
+    text: z.string().min(40).max(20000),
+    title: z.string().min(1).max(120).optional(),
+    level: levelEnum.optional(),
+    targetLanguage: targetEnum.optional(),
+    nativeLanguage: nativeEnum.optional(),
+    sourceUrl: z.string().max(500).optional(),
+    publish: z.union([z.boolean(), z.string()]).optional(),
+  }),
+};

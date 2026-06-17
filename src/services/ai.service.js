@@ -76,3 +76,65 @@ export async function generateCard({ targetLanguage, nativeLanguage, level, topi
   const parsed = JSON.parse(clean);
   return { title: parsed.title, body: parsed.body, vocab: parsed.vocab || [] };
 }
+
+// Summarizes a real news article into a short card while KEEPING the article's
+// natural reading level, and extracts the complex words with meanings in the
+// learner's native language. Mock mode derives a deterministic summary so the
+// pipeline runs with no keys.
+export async function summarizeArticle({ text, targetLanguage, nativeLanguage }) {
+  const native = SUPPORTED_NATIVE_LANGUAGES[nativeLanguage] || nativeLanguage;
+
+  if (config.mockExternal || !config.ai.apiKey) {
+    const words = text.trim().split(/\s+/);
+    const body = words.slice(0, 60).join(' ') + (words.length > 60 ? '…' : '');
+    const complex = [
+      ...new Set(words.map((w) => w.replace(/[^A-Za-z]/g, '')).filter((w) => w.length >= 8)),
+    ].slice(0, 4);
+    return {
+      title: (words.slice(0, 6).join(' ').replace(/[^\w\s]/g, '') || 'News summary').trim(),
+      body: body || text.slice(0, 300),
+      vocab: complex.map((w) => ({
+        term: w, partOfSpeech: 'word',
+        meaning: `(${native}) meaning of "${w}"`,
+        example: `A sentence using ${w}.`,
+      })),
+      _mock: true,
+    };
+  }
+
+  const target = languageMeta(targetLanguage)?.name || targetLanguage;
+  const prompt = `You are a language-learning editor. Summarize the NEWS ARTICLE below into one short, engaging card in ${target}, KEEPING the article's natural reading level (do NOT simplify). Then list the genuinely complex words.
+
+Return STRICT JSON only, no markdown:
+{
+  "title": "string (max 9 words, captures the story)",
+    "body": "string (about 40-55 words: a tight, self-contained summary in ${target} that fits a single quick-read card)",
+  "vocab": [
+    { "term": "complex word that appears in the summary",
+      "partOfSpeech": "noun|verb|adjective|adverb|...",
+      "meaning": "meaning written in ${native}",
+      "example": "short example sentence in ${target}" }
+  ]
+}
+Pick 4-7 genuinely advanced words. Meanings MUST be in ${native}.
+
+ARTICLE:
+"""
+${String(text).slice(0, 6000)}
+"""`;
+
+  const { default: OpenAI } = await import('openai');
+  const client = new OpenAI({ apiKey: config.ai.apiKey });
+  const completion = await client.chat.completions.create({
+    model: config.ai.model,
+    max_tokens: 1400,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: 'You summarize news for language learners. Reply with strict JSON only, no markdown.' },
+      { role: 'user', content: prompt },
+    ],
+  });
+  const txt = completion.choices?.[0]?.message?.content || '{}';
+  const parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
+  return { title: parsed.title, body: parsed.body, vocab: parsed.vocab || [] };
+}

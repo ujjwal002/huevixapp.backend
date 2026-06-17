@@ -9,6 +9,7 @@ import {
   createCardSchema,
   generateCardSchema,
   completeCardSchema,
+  createArticleSchema,
 } from '../validators/schemas.js';
 import * as card from '../controllers/card.controller.js';
 import * as speaking from '../controllers/speaking.controller.js';
@@ -51,5 +52,24 @@ router.post(
 // --- Admin ---
 router.post('/', requireAuth, requireAdmin, validate(createCardSchema), card.createCard);
 router.post('/generate', requireAuth, requireAdmin, validate(generateCardSchema), card.generateAndCreateCard);
+
+// after the existing audio `upload` multer:
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image uploads are allowed'));
+  },
+});
+
+// in the Admin section (multer must run before validate):
+router.post(
+  '/article',
+  requireAuth, requireAdmin,
+  imageUpload.single('image'),
+  validate(createArticleSchema),
+  card.createArticleFromNews
+);
 
 export default router;

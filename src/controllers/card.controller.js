@@ -6,6 +6,11 @@ import { synthesizeSpeech } from '../services/tts.service.js';
 import { touchStreak } from '../services/streak.service.js';
 import { notifyNewCard } from '../services/notification.service.js';
 
+import { saveBuffer } from '../services/storage.service.js';
+
+
+import {summarizeArticle} from '../services/ai.service.js';
+
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -37,6 +42,8 @@ export const getFeed = asyncHandler(async (req, res) => {
       audioUrl: true,
       audioStatus: true,
       wordCount: true,
+      imageUrl: true,
+      sourceUrl: true,
       createdAt: true,
     },
   });
@@ -104,6 +111,8 @@ export const getCard = asyncHandler(async (req, res) => {
     wordCount: card.wordCount,
     saved: req.user ? (card.savedBy?.length || 0) > 0 : false,
     vocab: card.vocab, // meanings already in the user's native language
+    imageUrl: card.imageUrl,
+    sourceUrl: card.sourceUrl,
   });
 });
 
@@ -192,6 +201,55 @@ export const generateAndCreateCard = asyncHandler(async (req, res) => {
   res.status(201).json(fresh);
 });
 
+// POST /cards/article — admin pastes a news article + uploads an image; AI
+// summarizes it (natural level) + extracts complex vocab; we store the image,
+// create the article card, and synthesize audio for listen + speak.
+export const createArticleFromNews = asyncHandler(async (req, res) => {
+
+  console.log('Received article creation request with body:', req.body);
+  if (!req.file) throw ApiError.badRequest('An image file is required (field "image")');
+
+  const targetLanguage = req.body.targetLanguage || 'en';
+  const nativeLanguage = req.body.nativeLanguage || 'hi';
+  const level = req.body.level || 'INTERMEDIATE';
+  const sourceUrl = req.body.sourceUrl?.trim() || null;
+  const publish =
+    req.body.publish === undefined ? true : req.body.publish === true || req.body.publish === 'true';
+
+  const summarized = await summarizeArticle({ text: req.body.text, targetLanguage, nativeLanguage });
+  const title = (req.body.title && req.body.title.trim()) || summarized.title;
+
+  const { url: imageUrl } = await saveBuffer(req.file.buffer, {
+    folder: 'images',
+    ext: imageExt(req.file.mimetype),
+  });
+
+  const card = await prisma.card.create({
+    data: {
+      targetLanguage, level, topic: 'news', title,
+      body: summarized.body,
+      wordCount: countWords(summarized.body),
+      imageUrl, sourceUrl, isPublished: publish,
+      vocab: summarized.vocab?.length
+        ? { create: summarized.vocab.map((v) => ({
+            nativeLanguage, term: v.term, partOfSpeech: v.partOfSpeech, meaning: v.meaning, example: v.example,
+          })) }
+        : undefined,
+    },
+  });
+
+  await generateAndAttachAudio(card.id, summarized.body, targetLanguage);
+  if (card.isPublished) await notifyNewCard(card);
+
+  const fresh = await prisma.card.findUnique({ where: { id: card.id }, include: { vocab: true } });
+  res.status(201).json(fresh);
+});
+
+function imageExt(mimetype) {
+  const map = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/gif': 'gif' };
+  return map[(mimetype || '').toLowerCase()] || 'jpg';
+}
+
 // Helper: synthesize TTS once and cache the URL on the card.
 async function generateAndAttachAudio(cardId, text, targetLanguage) {
   try {
@@ -249,6 +307,8 @@ export const listSavedCards = asyncHandler(async (req, res) => {
           audioUrl: true,
           audioStatus: true,
           wordCount: true,
+          imageUrl: true,
+          sourceUrl: true,
         },
       },
     },

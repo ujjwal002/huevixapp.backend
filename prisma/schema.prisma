@@ -127,6 +127,9 @@ model Card {
   audioStatus    AudioStatus @default(PENDING)
   isPublished    Boolean     @default(false)
 
+  imageUrl       String? // hero image shown at the top of an article card (news feature)
+  sourceUrl      String? // original news article link (optional)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
