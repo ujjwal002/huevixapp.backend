@@ -51,6 +51,14 @@ export const cardIdParam = {
   params: z.object({ id: z.string().uuid() }),
 };
 
+export const completeCardSchema = {
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    readDone: z.boolean().optional(),
+    listenDone: z.boolean().optional(),
+  }),
+};
+
 export const createCardSchema = {
   body: z.object({
     targetLanguage: targetEnum,

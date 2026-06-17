@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma.js';
+import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import {
@@ -7,14 +8,10 @@ import {
   verifyWebhookSignature,
   planPeriodEnd,
   planAmountInr,
+  createRecurringSubscription,
+  verifySubscriptionSignature,
+  cancelRecurringSubscription,
 } from '../services/payment.service.js';
-
-import { cancelRecurringSubscription } from '../services/payment.service.js';
-
-
-
-import { config } from '../config/env.js';
-import { createRecurringSubscription, verifySubscriptionSignature } from '../services/payment.service.js';
 
 // GET /subscription
 export const getSubscription = asyncHandler(async (req, res) => {
@@ -72,6 +69,16 @@ export const verify = asyncHandler(async (req, res) => {
   res.json({ success: true, subscription: updated });
 });
 
+// Extend a period end without ever shortening it: renew from the later of
+// "now" and the current period end so duplicate/early renewals don't lose time.
+function extendedPeriodEnd(plan, currentPeriodEnd) {
+  const base =
+    currentPeriodEnd && new Date(currentPeriodEnd) > new Date()
+      ? new Date(currentPeriodEnd)
+      : new Date();
+  return planPeriodEnd(plan, base);
+}
+
 // POST /subscription/webhook -> source of truth for renewals/refunds.
 // Mounted with a raw body parser so signature verification works.
 export const webhook = asyncHandler(async (req, res) => {
@@ -85,47 +92,89 @@ export const webhook = asyncHandler(async (req, res) => {
   const event = req.body?.event;
   const payload = req.body?.payload;
 
-  // Handle the events you care about. Example: payment captured / refunded.
+  // Fix #9: idempotency. Record the provider event id first; if we've already
+  // handled it, acknowledge and skip. If processing throws, delete the marker
+  // so the provider's retry can reprocess.
+  const eventId = req.headers['x-razorpay-event-id'];
+  if (eventId) {
+    try {
+      await prisma.processedWebhookEvent.create({
+        data: { id: String(eventId), eventType: event || 'unknown' },
+      });
+    } catch (e) {
+      if (e?.code === 'P2002') return res.json({ received: true, duplicate: true });
+      // Any other error: fall through and still attempt to process the event.
+    }
+  }
+
   try {
-    if (event === 'payment.captured') {
-      const orderId = payload?.payment?.entity?.order_id;
-      if (orderId) {
-        const sub = await prisma.subscription.findFirst({ where: { providerOrderId: orderId } });
-        if (sub && sub.status !== 'ACTIVE') {
-          await prisma.subscription.update({
-            where: { id: sub.id },
-            data: { status: 'ACTIVE', currentPeriodEnd: planPeriodEnd(sub.plan) },
+    switch (event) {
+      case 'payment.captured': {
+        const orderId = payload?.payment?.entity?.order_id;
+        if (orderId) {
+          const sub = await prisma.subscription.findFirst({ where: { providerOrderId: orderId } });
+          if (sub && sub.status !== 'ACTIVE') {
+            await prisma.subscription.update({
+              where: { id: sub.id },
+              data: { status: 'ACTIVE', currentPeriodEnd: planPeriodEnd(sub.plan) },
+            });
+          }
+        }
+        break;
+      }
+
+      case 'subscription.charged': {
+        const subId = payload?.subscription?.entity?.id;
+        if (subId) {
+          const s = await prisma.subscription.findFirst({ where: { providerRefId: subId } });
+          if (s) {
+            await prisma.subscription.update({
+              where: { id: s.id },
+              data: { status: 'ACTIVE', currentPeriodEnd: extendedPeriodEnd(s.plan, s.currentPeriodEnd) },
+            });
+          }
+        }
+        break;
+      }
+
+      case 'subscription.cancelled':
+      case 'subscription.halted':
+      case 'subscription.completed': {
+        const subId = payload?.subscription?.entity?.id;
+        if (subId) {
+          await prisma.subscription.updateMany({
+            where: { providerRefId: subId },
+            data: { status: 'CANCELED' },
           });
         }
+        break;
       }
-    } 
-    if (event === 'subscription.charged') {
-      const subId = payload?.subscription?.entity?.id;
-      if (subId) {
-        const s = await prisma.subscription.findFirst({ where: { providerRefId: subId } });
-        if (s) await prisma.subscription.update({ where: { id: s.id }, data: { status: 'ACTIVE', currentPeriodEnd: planPeriodEnd(s.plan, new Date()) } });
+
+      case 'refund.processed': {
+        const orderId = payload?.payment?.entity?.order_id;
+        if (orderId) {
+          await prisma.subscription.updateMany({
+            where: { providerOrderId: orderId },
+            data: { status: 'CANCELED' },
+          });
+        }
+        break;
       }
-    } else if (['subscription.cancelled', 'subscription.halted', 'subscription.completed'].includes(event)) {
-      const subId = payload?.subscription?.entity?.id;
-      if (subId) await prisma.subscription.updateMany({ where: { providerRefId: subId }, data: { status: 'CANCELED' } });
-    }
-    else if (event === 'refund.processed' || event === 'subscription.cancelled') {
-      const orderId = payload?.payment?.entity?.order_id;
-      if (orderId) {
-        await prisma.subscription.updateMany({
-          where: { providerOrderId: orderId },
-          data: { status: 'CANCELED' },
-        });
-      }
+
+      default:
+        break; // event we don't act on
     }
   } catch (err) {
     console.error('[WEBHOOK] handler error', err.message);
+    // Allow the provider to retry by clearing the idempotency marker.
+    if (eventId) {
+      await prisma.processedWebhookEvent.delete({ where: { id: String(eventId) } }).catch(() => {});
+    }
   }
 
   // Always 200 quickly so the provider stops retrying.
   res.json({ received: true });
 });
-
 
 export const startAutopay = asyncHandler(async (req, res) => {
   const planId = config.razorpay.planMonthly;
@@ -152,7 +201,6 @@ export const verifyAutopay = asyncHandler(async (req, res) => {
   });
   res.json({ success: true, subscription: updated });
 });
-
 
 export const cancelSubscription = asyncHandler(async (req, res) => {
   const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });

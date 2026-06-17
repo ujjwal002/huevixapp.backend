@@ -3,18 +3,28 @@ dotenv.config();
 
 const bool = (v, def = false) =>
   v === undefined ? def : ['true', '1', 'yes'].includes(String(v).toLowerCase());
-const int = (v, def) => (v === undefined ? def : parseInt(v, 10));
+const int = (v, def) => {
+  if (v === undefined) return def;
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? def : n; // ignore malformed numeric env vars
+};
+
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const isProd = NODE_ENV === 'production';
+
+const DEV_ACCESS_SECRET = 'dev-access-secret';
+const DEV_REFRESH_SECRET = 'dev-refresh-secret';
 
 export const config = {
-  env: process.env.NODE_ENV || 'development',
+  env: NODE_ENV,
   port: int(process.env.PORT, 4000),
   apiPrefix: process.env.API_PREFIX || '/api/v1',
 
   databaseUrl: process.env.DATABASE_URL,
 
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET || 'dev-access-secret',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
+    accessSecret: process.env.JWT_ACCESS_SECRET || DEV_ACCESS_SECRET,
+    refreshSecret: process.env.JWT_REFRESH_SECRET || DEV_REFRESH_SECRET,
     accessTtl: process.env.ACCESS_TOKEN_TTL || '15m',
     refreshTtlDays: int(process.env.REFRESH_TOKEN_TTL_DAYS, 30),
   },
@@ -31,7 +41,10 @@ export const config = {
     yearlyInr: int(process.env.PRICE_YEARLY_INR, 999),
   },
 
-  mockExternal: bool(process.env.MOCK_EXTERNAL, true),
+  // Fix #2: mock external services only outside production by default. A
+  // forgotten env var must never silently disable payment/signature checks in
+  // prod — so the default here is false when NODE_ENV=production.
+  mockExternal: bool(process.env.MOCK_EXTERNAL, !isProd),
 
   ai: {
     apiKey: process.env.OPENAI_API_KEY,
@@ -52,11 +65,39 @@ export const config = {
     planMonthly: process.env.RAZORPAY_PLAN_MONTHLY,
   },
 
-  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000')
+  // Minor fix: default CORS origin now matches the Vite dev frontend (5173)
+  // referenced elsewhere in the app, plus the old 3000 default.
+  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
 };
+
+// ---------------------------------------------------------------------------
+// Fix #1: refuse to boot in production with insecure config. A default/blank
+// JWT secret would let anyone forge tokens; mock mode would skip payment and
+// signature verification. Fail fast and loudly instead.
+// ---------------------------------------------------------------------------
+if (isProd) {
+  const problems = [];
+  if (!process.env.JWT_ACCESS_SECRET || config.jwt.accessSecret === DEV_ACCESS_SECRET) {
+    problems.push('JWT_ACCESS_SECRET is missing or using the insecure dev default');
+  }
+  if (!process.env.JWT_REFRESH_SECRET || config.jwt.refreshSecret === DEV_REFRESH_SECRET) {
+    problems.push('JWT_REFRESH_SECRET is missing or using the insecure dev default');
+  }
+  if (config.mockExternal) {
+    problems.push('MOCK_EXTERNAL must be false in production (mock skips payment/signature checks)');
+  }
+  if (!config.databaseUrl) {
+    problems.push('DATABASE_URL is required');
+  }
+  if (problems.length) {
+    throw new Error(
+      `Refusing to start in production with insecure configuration:\n  - ${problems.join('\n  - ')}`
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Language registry — the ONLY place you touch to launch a new language.

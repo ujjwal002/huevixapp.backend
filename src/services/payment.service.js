@@ -7,6 +7,22 @@ import { ApiError } from '../utils/ApiError.js';
 // order ids and accept any signature so you can test the subscription flow
 // end-to-end without a Razorpay account.
 
+// Fix #4: constant-time comparison of two hex digests that also tolerates a
+// wrong-length / missing candidate. crypto.timingSafeEqual throws a RangeError
+// when buffer lengths differ, which previously turned a malformed signature
+// into a 500. We normalise to fixed-length buffers first, then compare in
+// constant time.
+function safeHexEqual(expectedHex, actualHex) {
+  const expected = Buffer.from(String(expectedHex), 'utf8');
+  const actual = Buffer.from(String(actualHex || ''), 'utf8');
+  if (expected.length !== actual.length) {
+    // Still spend the work of a comparison to avoid leaking length via timing.
+    crypto.timingSafeEqual(expected, expected);
+    return false;
+  }
+  return crypto.timingSafeEqual(expected, actual);
+}
+
 export function planAmountInr(plan) {
   return plan === 'YEARLY' ? config.pricing.yearlyInr : config.pricing.monthlyInr;
 }
@@ -59,7 +75,7 @@ export function verifyPaymentSignature({ orderId, paymentId, signature }) {
     .createHmac('sha256', config.razorpay.keySecret)
     .update(`${orderId}|${paymentId}`)
     .digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature || ''));
+  return safeHexEqual(expected, signature);
 }
 
 // Verifies a Razorpay webhook payload signature.
@@ -69,7 +85,7 @@ export function verifyWebhookSignature(rawBody, signature) {
     .createHmac('sha256', config.razorpay.webhookSecret)
     .update(rawBody)
     .digest('hex');
-  return expected === signature;
+  return safeHexEqual(expected, signature); // Fix #4: constant-time, was plain ===
 }
 
 export async function createRecurringSubscription({ planId, userId, totalCount = 120 }) {
@@ -99,7 +115,7 @@ export function verifySubscriptionSignature({ subscriptionId, paymentId, signatu
     .createHmac('sha256', config.razorpay.keySecret)
     .update(`${paymentId}|${subscriptionId}`)
     .digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature || ''));
+  return safeHexEqual(expected, signature);
 }
 
 export async function cancelRecurringSubscription(subscriptionId) {

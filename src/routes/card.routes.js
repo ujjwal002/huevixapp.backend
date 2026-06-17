@@ -8,6 +8,7 @@ import {
   cardIdParam,
   createCardSchema,
   generateCardSchema,
+  completeCardSchema,
 } from '../validators/schemas.js';
 import * as card from '../controllers/card.controller.js';
 import * as speaking from '../controllers/speaking.controller.js';
@@ -34,7 +35,7 @@ router.get('/saved', requireAuth, card.listSavedCards);
 router.get('/:id', optionalAuth, validate(cardIdParam), card.getCard);
 
 // --- Account-only ---
-router.post('/:id/complete', requireAuth, validate(cardIdParam), card.completeCard);
+router.post('/:id/complete', requireAuth, validate(completeCardSchema), card.completeCard);
 router.post('/:id/save', requireAuth, validate(cardIdParam), card.saveCard);
 router.delete('/:id/save', requireAuth, validate(cardIdParam), card.unsaveCard);
 

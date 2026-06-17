@@ -13,6 +13,13 @@ export function errorHandler(err, _req, res, _next) {
     });
   }
 
+  // Fix #11: Prisma "record to update/delete not found" -> 404 (was a 500).
+  if (err?.code === 'P2025') {
+    return res.status(404).json({
+      error: { message: 'Resource not found', code: 'NOT_FOUND' },
+    });
+  }
+
   const statusCode = err.statusCode || 500;
   const body = {
     error: {

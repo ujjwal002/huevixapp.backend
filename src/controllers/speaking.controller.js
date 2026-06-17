@@ -1,13 +1,32 @@
+import path from 'node:path';
+import fs from 'node:fs';
 import { prisma } from '../db/prisma.js';
+import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { assessPronunciation } from '../services/speech.service.js';
-import { saveBuffer } from '../services/storage.service.js';
+import { saveBuffer, STORAGE_ROOT } from '../services/storage.service.js';
 import {
   getSpeakingAccess,
-  consumeSpeaking,
+  reserveCredit,
+  refundCredit,
 } from '../services/entitlement.service.js';
 import { touchStreak } from '../services/streak.service.js';
+
+// Build the authenticated URL the client uses to play a recording back. The
+// recording is NOT served from the public /static mount (Fix #3) — it is PII.
+function recordingUrl(attemptId) {
+  return `${config.apiPrefix}/speaking/recordings/${attemptId}`;
+}
+
+// Fix: clamp the client-controlled mime subtype to a short safe extension so it
+// can never influence the on-disk filename in unexpected ways.
+function safeExt(mimetype) {
+  const raw = (mimetype?.split('/')[1] || 'wav').replace('x-wav', 'wav').toLowerCase();
+  const cleaned = raw.replace(/[^a-z0-9]/g, '');
+  const allowed = new Set(['wav', 'webm', 'mp3', 'm4a', 'mp4', 'ogg', 'opus', 'aac', 'flac']);
+  return allowed.has(cleaned) ? cleaned : 'bin';
+}
 
 // POST /cards/:id/speak  (multipart: field "audio")
 // Reads the user's recording, scores it against the card text, stores the
@@ -24,20 +43,40 @@ export const submitSpeaking = asyncHandler(async (req, res) => {
     throw ApiError.payment(access.message, access.reason);
   }
 
-  // 2. Store the recording (optional but useful for review/debugging).
-  const saved = await saveBuffer(req.file.buffer, {
-    folder: 'recordings',
-    ext: (req.file.mimetype?.split('/')[1] || 'wav').replace('x-wav', 'wav'),
-  });
+  // 2. Fix #7: atomically reserve the consumable credit BEFORE touching paid
+  //    external APIs. If we lost a race, re-check access and surface the gate.
+  const reserved = await reserveCredit(req.user, access.source);
+  if (!reserved) {
+    const recheck = await getSpeakingAccess(req.user);
+    throw ApiError.payment(
+      recheck.message || 'Your free speaking attempts are used up. Subscribe to keep practising speaking.',
+      recheck.reason || 'PAYWALL'
+    );
+  }
 
-  // 3. Run pronunciation assessment against the reference text.
-  const result = await assessPronunciation({
-    audioBuffer: req.file.buffer,
-    referenceText: card.body,
-    targetLanguage: card.targetLanguage,
-  });
+  let saved;
+  let result;
+  try {
+    // 3. Store the recording (kept private; useful for review/debugging).
+    saved = await saveBuffer(req.file.buffer, {
+      folder: 'recordings',
+      ext: safeExt(req.file.mimetype),
+    });
 
-  // 4. Persist the attempt.
+    // 4. Run pronunciation assessment against the reference text.
+    result = await assessPronunciation({
+      audioBuffer: req.file.buffer,
+      referenceText: card.body,
+      targetLanguage: card.targetLanguage,
+    });
+  } catch (err) {
+    // Fix #7: a failed assessment must not cost the user a credit.
+    await refundCredit(req.user, access.source).catch(() => {});
+    throw err;
+  }
+
+  // 5. Persist the attempt. We store the storage KEY (not a public URL) so the
+  //    recording can only be fetched via the authenticated route (Fix #3).
   const attempt = await prisma.speakingAttempt.create({
     data: {
       userId: req.user.id,
@@ -50,12 +89,9 @@ export const submitSpeaking = asyncHandler(async (req, res) => {
       prosodyScore: result.prosodyScore,
       transcript: result.transcript,
       wordScores: result.wordScores,
-      audioUrl: saved.url,
+      audioUrl: saved.key, // relative storage key, e.g. "recordings/<uuid>.webm"
     },
   });
-
-  // 5. Consume the entitlement (trial/ad credit; subscription tracked by count).
-  await consumeSpeaking(req.user, access.source);
 
   // 6. Speaking counts as activity -> keep the streak alive.
   const streak = await touchStreak(req.user.id);
@@ -63,6 +99,7 @@ export const submitSpeaking = asyncHandler(async (req, res) => {
   res.status(201).json({
     attemptId: attempt.id,
     source: access.source,
+    recordingUrl: recordingUrl(attempt.id),
     scores: {
       overall: result.overallScore,
       accuracy: result.accuracyScore,
@@ -93,5 +130,30 @@ export const getSpeakingHistory = asyncHandler(async (req, res) => {
       card: { select: { title: true } },
     },
   });
-  res.json({ items: attempts });
+  res.json({
+    items: attempts.map((a) => ({ ...a, recordingUrl: recordingUrl(a.id) })),
+  });
+});
+
+// GET /speaking/recordings/:id  (Fix #3)
+// Streams a recording ONLY to the user who owns the attempt. The stored key is
+// resolved under STORAGE_ROOT and verified to stay inside it, so a crafted key
+// cannot be used for path traversal.
+export const getRecording = asyncHandler(async (req, res) => {
+  const attempt = await prisma.speakingAttempt.findUnique({
+    where: { id: req.params.id },
+    select: { userId: true, audioUrl: true },
+  });
+  if (!attempt || attempt.userId !== req.user.id) {
+    throw ApiError.notFound('Recording not found');
+  }
+  if (!attempt.audioUrl) throw ApiError.notFound('Recording not available');
+
+  const resolved = path.resolve(STORAGE_ROOT, attempt.audioUrl);
+  const root = path.resolve(STORAGE_ROOT) + path.sep;
+  if (!resolved.startsWith(root) || !fs.existsSync(resolved)) {
+    throw ApiError.notFound('Recording not found');
+  }
+
+  res.sendFile(resolved);
 });

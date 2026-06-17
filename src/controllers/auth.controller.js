@@ -31,6 +31,19 @@ async function issueTokens(user) {
   return { accessToken, refreshToken: raw };
 }
 
+// Best-effort housekeeping: drop this user's expired/revoked tokens so the
+// table doesn't grow without bound (Fix #5).
+async function pruneDeadTokens(userId) {
+  await prisma.refreshToken
+    .deleteMany({
+      where: {
+        userId,
+        OR: [{ expiresAt: { lt: new Date() } }, { revokedAt: { not: null } }],
+      },
+    })
+    .catch(() => {});
+}
+
 export const register = asyncHandler(async (req, res) => {
   const { email, password, name, nativeLanguage, targetLanguage } = req.body;
 
@@ -73,8 +86,20 @@ export const refresh = asyncHandler(async (req, res) => {
     include: { user: true },
   });
 
-  if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+  // Unknown or expired token: cannot identify a family, just reject.
+  if (!stored || stored.expiresAt < new Date()) {
     throw ApiError.unauthorized('Invalid or expired refresh token', 'REFRESH_INVALID');
+  }
+
+  // Fix #5: reuse detection. A token that was already rotated (revoked) being
+  // presented again means it was likely stolen/replayed. Revoke the user's
+  // entire token family so neither party can keep using leaked tokens.
+  if (stored.revokedAt) {
+    await prisma.refreshToken.updateMany({
+      where: { userId: stored.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    throw ApiError.unauthorized('Refresh token reuse detected; please sign in again', 'REFRESH_REUSE');
   }
 
   // Rotate: revoke the used token, issue a new pair.
@@ -83,6 +108,7 @@ export const refresh = asyncHandler(async (req, res) => {
     data: { revokedAt: new Date() },
   });
   const tokens = await issueTokens(stored.user);
+  await pruneDeadTokens(stored.userId);
   res.json(tokens);
 });
 

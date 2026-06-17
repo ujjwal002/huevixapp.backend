@@ -78,6 +78,9 @@ model User {
   adCreditsRemaining           Int       @default(0) // earned via rewarded ads
   adCreditsGrantedDate         DateTime? @db.Date // for daily ad-credit reset
 
+  adCreditsGrantedToday        Int       @default(0) // credits GRANTED today; the real daily cap, never decremented on spend
+
+
   notificationsReadAt DateTime?
   savedCards       SavedCard[]
 
@@ -89,6 +92,8 @@ model User {
   completions      CardCompletion[]
   speakingAttempts SpeakingAttempt[]
   vocabProgress VocabProgress[]
+
+  
 
   @@index([targetLanguage])
 }
@@ -292,4 +297,11 @@ model SponsoredCard {
   imageUrl   String?
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
+}
+
+
+model ProcessedWebhookEvent {
+  id        String   @id // provider event id (e.g. Razorpay x-razorpay-event-id)
+  eventType String
+  createdAt DateTime @default(now())
 }

@@ -21,7 +21,10 @@ export const getFeed = asyncHandler(async (req, res) => {
 
   const cards = await prisma.card.findMany({
     where,
-    orderBy: { createdAt: 'desc' },
+    // Fix #10: cursor pagination needs a stable, unique ordering. Adding `id`
+    // as a tiebreaker prevents skipped/duplicated cards when two share a
+    // createdAt (e.g. batch-seeded or AI-generated in the same millisecond).
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     select: {

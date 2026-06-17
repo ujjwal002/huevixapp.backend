@@ -10,6 +10,8 @@ import * as notif from '../controllers/notification.controller.js';
 const speakingRouter = Router();
 speakingRouter.use(requireAuth);
 speakingRouter.get('/history', speaking.getSpeakingHistory);
+// Fix #3: recordings are PII — served only to their owner, never from /static.
+speakingRouter.get('/recordings/:id', speaking.getRecording);
 
 const adsRouter = Router();
 adsRouter.use(requireAuth);

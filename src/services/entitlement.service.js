@@ -26,15 +26,17 @@ export async function countTodaySpeaking(userId) {
   });
 }
 
-// Reset a free user's ad credits at the start of each UTC day.
+// Reset a free user's ad credits at the start of each UTC day. Resets BOTH the
+// spendable balance and the daily-granted counter (Fix #8).
 export async function ensureDailyAdCredits(user) {
   const today = startOfUtcDay();
   if (!isSameUtcDay(user.adCreditsGrantedDate, today)) {
     const updated = await prisma.user.update({
       where: { id: user.id },
-      data: { adCreditsRemaining: 0, adCreditsGrantedDate: today },
+      data: { adCreditsRemaining: 0, adCreditsGrantedToday: 0, adCreditsGrantedDate: today },
     });
     user.adCreditsRemaining = updated.adCreditsRemaining;
+    user.adCreditsGrantedToday = updated.adCreditsGrantedToday;
     user.adCreditsGrantedDate = updated.adCreditsGrantedDate;
   }
   return user;
@@ -71,38 +73,89 @@ export async function getSpeakingAccess(user) {
   };
 }
 
-// Decrement the relevant counter AFTER a successful assessment.
-export async function consumeSpeaking(user, source) {
+// Fix #7: atomically RESERVE a consumable credit BEFORE doing the expensive,
+// paid assessment. The conditional `updateMany` only decrements when a credit
+// is actually available, so two concurrent requests cannot both spend the same
+// credit (the second one matches 0 rows). Returns true if a credit was taken.
+// SUBSCRIPTION usage is tracked by the SpeakingAttempt row count, so there is
+// nothing to reserve.
+export async function reserveCredit(user, source) {
+  if (source === 'TRIAL') {
+    const r = await prisma.user.updateMany({
+      where: { id: user.id, freeSpeakingCreditsRemaining: { gt: 0 } },
+      data: { freeSpeakingCreditsRemaining: { decrement: 1 } },
+    });
+    if (r.count === 1) user.freeSpeakingCreditsRemaining -= 1;
+    return r.count === 1;
+  }
+  if (source === 'AD') {
+    const r = await prisma.user.updateMany({
+      where: { id: user.id, adCreditsRemaining: { gt: 0 } },
+      data: { adCreditsRemaining: { decrement: 1 } },
+    });
+    if (r.count === 1) user.adCreditsRemaining -= 1;
+    return r.count === 1;
+  }
+  return true; // SUBSCRIPTION
+}
+
+// Fix #7: give a reserved credit back if the assessment fails, so a failed
+// external call never costs the user a credit.
+export async function refundCredit(user, source) {
   if (source === 'TRIAL') {
     await prisma.user.update({
       where: { id: user.id },
-      data: { freeSpeakingCreditsRemaining: { decrement: 1 } },
+      data: { freeSpeakingCreditsRemaining: { increment: 1 } },
     });
+    user.freeSpeakingCreditsRemaining += 1;
   } else if (source === 'AD') {
     await prisma.user.update({
       where: { id: user.id },
-      data: { adCreditsRemaining: { decrement: 1 } },
+      data: { adCreditsRemaining: { increment: 1 } },
     });
+    user.adCreditsRemaining += 1;
   }
-  // SUBSCRIPTION usage is tracked by the SpeakingAttempt row count (daily cap).
 }
 
 // Grant a rewarded-ad credit (free users only), capped per day.
+// Fix #8: the cap is enforced against adCreditsGrantedToday (credits GRANTED
+// today), NOT the spendable balance, so a user can no longer earn unlimited
+// credits by spending and re-watching ads. The conditional updateMany also
+// makes granting atomic, so concurrent claims cannot exceed the daily cap.
 export async function grantAdCredit(user) {
   await ensureDailyAdCredits(user);
 
   if (isSubscriptionActive(user)) {
     return { granted: false, reason: 'ALREADY_SUBSCRIBED' };
   }
-  // Count how many ad credits already granted today by inspecting cap.
-  if (user.adCreditsRemaining >= config.entitlement.maxAdCreditsPerDay) {
+
+  const max = config.entitlement.maxAdCreditsPerDay;
+  const today = startOfUtcDay();
+  const r = await prisma.user.updateMany({
+    where: { id: user.id, adCreditsGrantedToday: { lt: max } },
+    data: {
+      adCreditsRemaining: { increment: 1 },
+      adCreditsGrantedToday: { increment: 1 },
+      adCreditsGrantedDate: today,
+    },
+  });
+
+  if (r.count === 0) {
     return { granted: false, reason: 'DAILY_AD_LIMIT', adCreditsRemaining: user.adCreditsRemaining };
   }
-  const updated = await prisma.user.update({
+
+  const fresh = await prisma.user.findUnique({
     where: { id: user.id },
-    data: { adCreditsRemaining: { increment: 1 }, adCreditsGrantedDate: startOfUtcDay() },
+    select: { adCreditsRemaining: true, adCreditsGrantedToday: true },
   });
-  return { granted: true, adCreditsRemaining: updated.adCreditsRemaining };
+  user.adCreditsRemaining = fresh.adCreditsRemaining;
+  user.adCreditsGrantedToday = fresh.adCreditsGrantedToday;
+  return {
+    granted: true,
+    adCreditsRemaining: fresh.adCreditsRemaining,
+    grantedToday: fresh.adCreditsGrantedToday,
+    dailyCap: max,
+  };
 }
 
 export async function getEntitlementSummary(user) {
@@ -115,6 +168,8 @@ export async function getEntitlementSummary(user) {
     currentPeriodEnd: user.subscription?.currentPeriodEnd || null,
     freeSpeakingCreditsRemaining: user.freeSpeakingCreditsRemaining,
     adCreditsRemaining: user.adCreditsRemaining,
+    adCreditsGrantedToday: user.adCreditsGrantedToday,
+    maxAdCreditsPerDay: config.entitlement.maxAdCreditsPerDay,
     paidDailyLimit: config.entitlement.paidDailySpeakingLimit,
     paidUsedToday: usedToday,
   };
