@@ -39,6 +39,7 @@ export const config = {
   pricing: {
     monthlyInr: int(process.env.PRICE_MONTHLY_INR, 100),
     yearlyInr: int(process.env.PRICE_YEARLY_INR, 999),
+    promoPerDayInr: int(process.env.PROMO_PER_DAY_INR, 299),
   },
 
   // Fix #2: mock external services only outside production by default. A

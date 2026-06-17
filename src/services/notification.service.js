@@ -17,3 +17,19 @@ export async function notifyNewCard(card) {
     console.error('[notify] failed to create notification', err.message);
   }
 }
+
+// Global notification announcing a newly-approved startup promo. Attractive
+// copy to drive taps; opening the app surfaces the promo (it has feed priority).
+export async function notifyPromoLive(promo) {
+  try {
+    await prisma.notification.create({
+      data: {
+        type: 'PROMO',
+        title: `🚀 ${promo.startupName} just launched`,
+        body: promo.title,
+      },
+    });
+  } catch (err) {
+    console.error('[notify] failed to create promo notification', err.message);
+  }
+}

@@ -131,3 +131,48 @@ export async function cancelRecurringSubscription(subscriptionId) {
     // don't throw — we still cancel locally
   }
 }
+
+
+// One-time order for an arbitrary amount (used by paid startup promos). Unlike
+// createOrder (which prices a subscription plan), this takes the amount directly.
+export async function createPromoOrder({ amountPaise, userId, promoId }) {
+  if (config.mockExternal || !config.razorpay.keyId) {
+    return {
+      orderId: `order_mock_${crypto.randomBytes(8).toString('hex')}`,
+      amount: amountPaise,
+      currency: 'INR',
+      keyId: 'rzp_test_mock',
+      _mock: true,
+    };
+  }
+  const { default: Razorpay } = await import('razorpay');
+  const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });
+  try {
+    const order = await instance.orders.create({
+      amount: amountPaise,
+      currency: 'INR',
+      receipt: `promo_${Date.now()}`,
+      notes: { userId, promoId, kind: 'startup_promo' },
+    });
+    return { orderId: order.id, amount: order.amount, currency: order.currency, keyId: config.razorpay.keyId };
+  } catch (e) {
+    console.error('[razorpay] promo order create failed:', e?.error?.description || e?.message || e);
+    throw ApiError.badRequest(e?.error?.description || 'Razorpay order creation failed', 'RAZORPAY_ERROR');
+  }
+}
+
+// Refunds a captured payment (used when an admin rejects a paid promo).
+export async function refundPayment(paymentId, amountPaise) {
+  if (config.mockExternal || !config.razorpay.keyId || !paymentId || String(paymentId).includes('mock')) {
+    return { refundId: `rfnd_mock_${crypto.randomBytes(6).toString('hex')}`, _mock: true };
+  }
+  const { default: Razorpay } = await import('razorpay');
+  const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });
+  try {
+    const refund = await instance.payments.refund(paymentId, { amount: amountPaise });
+    return { refundId: refund.id };
+  } catch (e) {
+    console.error('[razorpay] refund failed:', e?.error?.description || e?.message || e);
+    throw ApiError.badRequest(e?.error?.description || 'Refund failed', 'RAZORPAY_ERROR');
+  }
+}

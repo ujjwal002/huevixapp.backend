@@ -115,3 +115,34 @@ export const createArticleSchema = {
     publish: z.union([z.boolean(), z.string()]).optional(),
   }),
 };
+
+
+// ---- Startup promos (paid user ads) ----
+export const createPromoSchema = {
+  body: z.object({
+    startupName: z.string().min(1).max(60),
+    title: z.string().min(1).max(120),
+    body: z.string().min(1).max(280),
+    ctaUrl: z.string().url().max(500),
+    ctaText: z.string().min(1).max(24).optional(),
+    imageUrl: z.union([z.string().url().max(500), z.literal('')]).optional(),
+    days: z.coerce.number().int().min(1).max(30).default(1),
+  }),
+};
+
+export const confirmPromoSchema = {
+  params: z.object({ id: z.string().min(8) }),
+  body: z.object({
+    paymentId: z.string().min(1),
+    signature: z.string().min(1),
+  }),
+};
+
+export const promoIdParam = {
+  params: z.object({ id: z.string().min(8) }),
+};
+
+export const rejectPromoSchema = {
+  params: z.object({ id: z.string().min(8) }),
+  body: z.object({ reason: z.string().max(280).optional() }),
+};

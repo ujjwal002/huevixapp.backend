@@ -92,6 +92,7 @@ model User {
   completions      CardCompletion[]
   speakingAttempts SpeakingAttempt[]
   vocabProgress VocabProgress[]
+  startupPromos StartupPromo[]
 
   
 
@@ -307,4 +308,68 @@ model ProcessedWebhookEvent {
   id        String   @id // provider event id (e.g. Razorpay x-razorpay-event-id)
   eventType String
   createdAt DateTime @default(now())
+}
+
+
+// ----------------------------- Startup promos (paid user ads) -----------------
+
+enum PromoStatus {
+  PENDING_PAYMENT // created; awaiting upfront payment
+  PENDING_REVIEW  // paid; awaiting admin approval
+  ACTIVE          // approved & live (until expiresAt)
+  REJECTED        // admin rejected; payment refunded
+  EXPIRED         // ran its full duration
+}
+
+// A user-created, PAID promotion ("promote your startup"). Distinct from the
+// admin-run SponsoredCard house ads: it has an owner, an upfront payment, a
+// review step, a per-day live window, and per-viewer impression tracking.
+model StartupPromo {
+  id      String @id @default(cuid())
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Card content
+  startupName String // shown as the advertiser
+  title       String // headline
+  body        String // short description
+  ctaText     String  @default("Visit")
+  ctaUrl      String
+  imageUrl    String?
+
+  // Purchase
+  days              Int         @default(1)
+  amountPaise       Int // 299 * days * 100
+  status            PromoStatus @default(PENDING_PAYMENT)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  refundId          String?
+  rejectionReason   String?
+
+  // Live window — starts at APPROVAL (go-live), not at payment
+  liveAt    DateTime?
+  expiresAt DateTime?
+
+  // Metrics
+  clicks      Int               @default(0)
+  impressions PromoImpression[] // unique viewers = number of rows
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([ownerId])
+}
+
+// One row per (promo, user): impressions count UNIQUE logged-in viewers, not
+// repeat scrolls. Guests are not counted.
+model PromoImpression {
+  id        String       @id @default(cuid())
+  promoId   String
+  promo     StartupPromo @relation(fields: [promoId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime     @default(now())
+
+  @@unique([promoId, userId])
+  @@index([promoId])
 }
