@@ -17,9 +17,18 @@ export const getMe = asyncHandler(async (req, res) => {
 });
 
 export const updateMe = asyncHandler(async (req, res) => {
+  // Map only user-editable fields. Validation already strips unknown keys, but
+  // an explicit allow-list keeps mass-assignment (e.g. role/email) impossible
+  // even if the schema is loosened later.
+  const { name, nativeLanguage, targetLanguage } = req.body;
+  const data = {};
+  if (name !== undefined) data.name = name;
+  if (nativeLanguage !== undefined) data.nativeLanguage = nativeLanguage;
+  if (targetLanguage !== undefined) data.targetLanguage = targetLanguage;
+
   const updated = await prisma.user.update({
     where: { id: req.user.id },
-    data: req.body,
+    data,
   });
   res.json({
     id: updated.id,

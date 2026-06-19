@@ -71,8 +71,37 @@ Set `MOCK_EXTERNAL=false` and provide:
 Install the optional SDKs when you switch a feature on:
 `npm install microsoft-cognitiveservices-speech-sdk razorpay @anthropic-ai/sdk`
 
-Also swap `STORAGE_DRIVER` from `local` to S3/GCS (implement in
-`src/services/storage.service.js`).
+### Storage: local ↔ S3 (one switch)
+
+Storage is selected by a single env var, `STORAGE_DRIVER`:
+
+```bash
+STORAGE_DRIVER=local   # default — writes ./storage, served at /static
+STORAGE_DRIVER=s3      # uploads to S3 instead; nothing else in the code changes
+```
+
+When `STORAGE_DRIVER=s3`, also set:
+
+```bash
+S3_BUCKET=your-bucket
+S3_REGION=ap-south-1                       # or AWS_REGION
+AWS_ACCESS_KEY_ID=...                      # standard AWS creds (or an IAM role)
+AWS_SECRET_ACCESS_KEY=...
+# optional:
+STORAGE_PUBLIC_BASE_URL=https://cdn.example.com   # CloudFront/CDN for public assets
+S3_ENDPOINT=https://...                    # for S3-compatible stores (R2/MinIO)
+S3_FORCE_PATH_STYLE=true                   # usually needed with S3_ENDPOINT
+```
+
+Install the SDKs when you flip it on:
+`npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner`
+
+**Bucket setup (important):** keep the bucket **private**. Public-read access is
+only needed for the `tts/` and `images/` prefixes (TTS audio and article
+images) — grant those via a bucket policy or, preferably, put CloudFront in
+front and point `STORAGE_PUBLIC_BASE_URL` at it. The `recordings/` prefix must
+stay private: the app never exposes it, and serves each recording to its owner
+through a short-lived presigned URL.
 
 ---
 

@@ -12,10 +12,17 @@ import { STORAGE_ROOT } from './services/storage.service.js';
 
 const app = express();
 
-// helmet's default Cross-Origin-Resource-Policy is "same-origin", which blocks
-// the frontend (port 5173) from loading generated audio served at /static on
-// port 4000. Relax it to cross-origin so <audio> can play the TTS files.
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// Behind cloudflared/ngrok (see setup.md) the socket peer is the tunnel, not
+// the user. Trust the configured number of proxy hops so req.ip is the real
+// client address — otherwise every request shares one IP and the per-IP rate
+// limiters become a single global bucket (one attacker locks everyone out).
+app.set('trust proxy', config.trustProxy);
+
+// Use helmet's secure defaults (same-origin Cross-Origin-Resource-Policy). CORP
+// is relaxed to cross-origin ONLY on the /static mount below, so generated TTS
+// audio can be loaded by the frontend (port 5173) without weakening every
+// other response.
+app.use(helmet());
 app.use(
   cors({
     origin: (origin, cb) => {
@@ -54,7 +61,16 @@ app.use(globalLimiter);
 app.use('/static/recordings', (_req, res) =>
   res.status(404).json({ error: { message: 'Not found', code: 'NOT_FOUND' } })
 );
-app.use('/static', express.static(STORAGE_ROOT));
+app.use(
+  '/static',
+  (_req, res, next) => {
+    // Relax CORP here (and only here) so cross-origin <audio>/<img> can load
+    // the generated media. API/JSON responses keep helmet's same-origin default.
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  },
+  express.static(STORAGE_ROOT)
+);
 
 app.use(config.apiPrefix, routes);
 

@@ -166,13 +166,16 @@ export const webhook = asyncHandler(async (req, res) => {
     }
   } catch (err) {
     console.error('[WEBHOOK] handler error', err.message);
-    // Allow the provider to retry by clearing the idempotency marker.
+    // Clear the idempotency marker so the retry can reprocess, and return 5xx so
+    // Razorpay actually retries. (Returning 200 here would tell the provider the
+    // event succeeded, permanently dropping e.g. a renewal or cancellation.)
     if (eventId) {
       await prisma.processedWebhookEvent.delete({ where: { id: String(eventId) } }).catch(() => {});
     }
+    return res.status(500).json({ received: false, error: 'WEBHOOK_PROCESSING_FAILED' });
   }
 
-  // Always 200 quickly so the provider stops retrying.
+  // Acknowledge so the provider stops retrying a successfully-handled event.
   res.json({ received: true });
 });
 

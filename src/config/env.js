@@ -15,6 +15,26 @@ const isProd = NODE_ENV === 'production';
 const DEV_ACCESS_SECRET = 'dev-access-secret';
 const DEV_REFRESH_SECRET = 'dev-refresh-secret';
 
+// --- Storage (single switch: STORAGE_DRIVER = local | s3) -------------------
+const STORAGE_DRIVER = process.env.STORAGE_DRIVER || 'local';
+const S3_BUCKET = process.env.S3_BUCKET;
+const S3_REGION = process.env.S3_REGION || process.env.AWS_REGION || 'ap-south-1';
+const S3_ENDPOINT = process.env.S3_ENDPOINT || undefined; // for S3-compatible (R2/MinIO)
+const S3_FORCE_PATH_STYLE = bool(process.env.S3_FORCE_PATH_STYLE, false);
+
+// Where PUBLIC assets (TTS audio, article images) are served from. For s3 we
+// derive a sensible default from the bucket so it works before a CDN is set up;
+// override with STORAGE_PUBLIC_BASE_URL (e.g. a CloudFront domain).
+function defaultPublicBase() {
+  if (STORAGE_DRIVER !== 's3') return 'http://localhost:4000/static';
+  if (S3_ENDPOINT) {
+    const base = S3_ENDPOINT.replace(/\/$/, '');
+    return S3_FORCE_PATH_STYLE && S3_BUCKET ? `${base}/${S3_BUCKET}` : base;
+  }
+  if (S3_BUCKET) return `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com`;
+  return 'http://localhost:4000/static'; // s3 selected but unconfigured; validated below
+}
+
 export const config = {
   env: NODE_ENV,
   port: int(process.env.PORT, 4000),
@@ -28,7 +48,15 @@ export const config = {
     accessTtl: process.env.ACCESS_TOKEN_TTL || '15m',
     refreshTtlDays: int(process.env.REFRESH_TOKEN_TTL_DAYS, 30),
   },
-  bcryptRounds: int(process.env.BCRYPT_ROUNDS, 10),
+  bcryptRounds: int(process.env.BCRYPT_ROUNDS, 12),
+
+  // Number of reverse-proxy hops to trust for client IP resolution. The app is
+  // deployed behind cloudflared/ngrok (see setup.md), so without this every
+  // request looks like it comes from 127.0.0.1 and the per-IP rate limiters
+  // collapse into a single global bucket. Set to the real hop count (1 for a
+  // single tunnel/CDN in front). A numeric value keeps express-rate-limit happy
+  // (it rejects the permissive `true`, which would let clients spoof IPs).
+  trustProxy: int(process.env.TRUST_PROXY, 1),
 
   entitlement: {
     freeSpeakingTrial: int(process.env.FREE_SPEAKING_TRIAL, 3),
@@ -56,8 +84,14 @@ export const config = {
     region: process.env.AZURE_SPEECH_REGION || 'centralindia',
   },
   storage: {
-    driver: process.env.STORAGE_DRIVER || 'local',
-    publicBaseUrl: process.env.STORAGE_PUBLIC_BASE_URL || 'http://localhost:4000/static',
+    driver: STORAGE_DRIVER, // 'local' | 's3'  — the one switch
+    publicBaseUrl: (process.env.STORAGE_PUBLIC_BASE_URL || defaultPublicBase()).replace(/\/$/, ''),
+    s3: {
+      bucket: S3_BUCKET,
+      region: S3_REGION,
+      endpoint: S3_ENDPOINT,
+      forcePathStyle: S3_FORCE_PATH_STYLE,
+    },
   },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID,
@@ -98,6 +132,18 @@ if (isProd) {
       `Refusing to start in production with insecure configuration:\n  - ${problems.join('\n  - ')}`
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Storage config validation. Fail fast on an unknown driver, or on s3 selected
+// without a bucket — so a half-configured switch can't silently misbehave.
+// (AWS credentials come from the standard AWS env vars / IAM role.)
+// ---------------------------------------------------------------------------
+if (!['local', 's3'].includes(config.storage.driver)) {
+  throw new Error(`Unknown STORAGE_DRIVER "${config.storage.driver}" (expected "local" or "s3")`);
+}
+if (config.storage.driver === 's3' && !config.storage.s3.bucket) {
+  throw new Error('STORAGE_DRIVER=s3 requires S3_BUCKET (set it plus AWS credentials before switching)');
 }
 
 // ---------------------------------------------------------------------------

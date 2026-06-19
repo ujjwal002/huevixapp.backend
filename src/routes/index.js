@@ -8,8 +8,12 @@ import sponsoredRoutes from './sponsored.routes.js';
 
 import promoRoutes from './promo.routes.js';
 
+import settingsRoutes from './settings.routes.js';
+
 
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
+import { getAppSettings } from '../services/settings.service.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import {
   SUPPORTED_LANGUAGES,
   SUPPORTED_NATIVE_LANGUAGES,
@@ -22,13 +26,20 @@ router.get('/health', (_req, res) =>
   res.json({ status: 'ok', mock: config.mockExternal, time: new Date().toISOString() })
 );
 
-// Public metadata: which languages + pricing the client should show.
-router.get('/meta', (_req, res) =>
-  res.json({
-    targetLanguages: SUPPORTED_LANGUAGES,
-    nativeLanguages: SUPPORTED_NATIVE_LANGUAGES,
-    pricing: config.pricing,
-    entitlement: config.entitlement,
+// Public metadata: which languages + pricing the client should show, plus the
+// current ad settings (master switch + cadence hint) so the app knows whether
+// and how densely to weave ads into the feed.
+router.get(
+  '/meta',
+  asyncHandler(async (_req, res) => {
+    const settings = await getAppSettings();
+    res.json({
+      targetLanguages: SUPPORTED_LANGUAGES,
+      nativeLanguages: SUPPORTED_NATIVE_LANGUAGES,
+      pricing: config.pricing,
+      entitlement: config.entitlement,
+      ads: { enabled: settings.adsEnabled, everyNCards: settings.adEveryNCards },
+    });
   })
 );
 
@@ -46,5 +57,7 @@ router.use('/grammar', grammarRoutes);
 router.use('/sponsored', sponsoredRoutes);
 
 router.use('/promos', promoRoutes);
+
+router.use('/admin/settings', settingsRoutes);
 
 export default router;

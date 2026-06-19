@@ -1,11 +1,9 @@
-import path from 'node:path';
-import fs from 'node:fs';
 import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { assessPronunciation } from '../services/speech.service.js';
-import { saveBuffer, STORAGE_ROOT } from '../services/storage.service.js';
+import { saveBuffer, resolveLocalPath, getPresignedDownloadUrl } from '../services/storage.service.js';
 import {
   getSpeakingAccess,
   reserveCredit,
@@ -136,9 +134,11 @@ export const getSpeakingHistory = asyncHandler(async (req, res) => {
 });
 
 // GET /speaking/recordings/:id  (Fix #3)
-// Streams a recording ONLY to the user who owns the attempt. The stored key is
-// resolved under STORAGE_ROOT and verified to stay inside it, so a crafted key
-// cannot be used for path traversal.
+// Streams a recording ONLY to the user who owns the attempt.
+//   - local: served from disk; the stored key is resolved under STORAGE_ROOT
+//     and verified to stay inside it, so a crafted key cannot traverse out.
+//   - s3: the bucket stays private; the owner is redirected to a short-lived
+//     presigned URL (which also gives the browser range requests for seeking).
 export const getRecording = asyncHandler(async (req, res) => {
   const attempt = await prisma.speakingAttempt.findUnique({
     where: { id: req.params.id },
@@ -149,11 +149,12 @@ export const getRecording = asyncHandler(async (req, res) => {
   }
   if (!attempt.audioUrl) throw ApiError.notFound('Recording not available');
 
-  const resolved = path.resolve(STORAGE_ROOT, attempt.audioUrl);
-  const root = path.resolve(STORAGE_ROOT) + path.sep;
-  if (!resolved.startsWith(root) || !fs.existsSync(resolved)) {
-    throw ApiError.notFound('Recording not found');
+  if (config.storage.driver === 's3') {
+    const url = await getPresignedDownloadUrl(attempt.audioUrl, { expiresIn: 300 });
+    return res.redirect(302, url);
   }
 
+  const resolved = resolveLocalPath(attempt.audioUrl);
+  if (!resolved) throw ApiError.notFound('Recording not found');
   res.sendFile(resolved);
 });

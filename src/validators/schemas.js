@@ -8,9 +8,32 @@ const targetEnum = z.enum(Object.keys(SUPPORTED_LANGUAGES));
 const nativeEnum = z.enum(Object.keys(SUPPORTED_NATIVE_LANGUAGES));
 const levelEnum = z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']);
 
+// Normalize email before validating so "User@X.com " and "user@x.com" can't
+// become two distinct accounts and login stays case-insensitive.
+const emailField = z.preprocess(
+  (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+  z.string().email()
+);
+
+// zod's .url() only checks that new URL() parses, which ACCEPTS javascript: and
+// data: schemes — dangerous for values we store and render to other users.
+// httpUrl: strictly absolute http(s). safeLinkUrl: http(s) OR an in-app
+// root-relative path ("/checkout"), but never "//host" (protocol-relative),
+// javascript:, or data:.
+const httpUrl = z
+  .string()
+  .max(500)
+  .refine((v) => /^https?:\/\//i.test(v), { message: 'Must be an http(s) URL' });
+const safeLinkUrl = z
+  .string()
+  .max(500)
+  .refine((v) => /^https?:\/\//i.test(v) || /^\/(?!\/)/.test(v), {
+    message: 'URL must be http(s) or a root-relative path (not //, javascript:, or data:)',
+  });
+
 export const registerSchema = {
   body: z.object({
-    email: z.string().email(),
+    email: emailField,
     password: z.string().min(8).max(128),
     name: z.string().min(1).max(80).optional(),
     nativeLanguage: nativeEnum.optional(),
@@ -20,7 +43,7 @@ export const registerSchema = {
 
 export const loginSchema = {
   body: z.object({
-    email: z.string().email(),
+    email: emailField,
     password: z.string().min(1),
   }),
 };
@@ -123,9 +146,9 @@ export const createPromoSchema = {
     startupName: z.string().min(1).max(60),
     title: z.string().min(1).max(120),
     body: z.string().min(1).max(280),
-    ctaUrl: z.string().url().max(500),
+    ctaUrl: httpUrl,
     ctaText: z.string().min(1).max(24).optional(),
-    imageUrl: z.union([z.string().url().max(500), z.literal('')]).optional(),
+    imageUrl: z.union([httpUrl, z.literal('')]).optional(),
     days: z.coerce.number().int().min(1).max(30).default(1),
   }),
 };
@@ -145,4 +168,49 @@ export const promoIdParam = {
 export const rejectPromoSchema = {
   params: z.object({ id: z.string().min(8) }),
   body: z.object({ reason: z.string().max(280).optional() }),
+};
+
+// ---- Sponsored house ads (admin-managed) ----
+// ctaUrl uses safeLinkUrl because a sponsored CTA may be an in-app path like
+// "/checkout?plan=MONTHLY" (a leading "/" opens in-app; a full URL opens the
+// browser). javascript:/data:/protocol-relative are rejected.
+export const sponsoredIdParam = {
+  params: z.object({ id: z.string().min(1) }),
+};
+
+// ---- App settings (admin) ----
+export const updateSettingsSchema = {
+  body: z
+    .object({
+      adsEnabled: z.boolean().optional(),
+      adEveryNCards: z.coerce.number().int().min(1).max(50).optional(),
+    })
+    .refine((o) => Object.keys(o).length > 0, { message: 'No settings to update' }),
+};
+
+export const createSponsoredSchema = {
+  body: z.object({
+    advertiser: z.string().min(1).max(80),
+    title: z.string().min(1).max(120),
+    body: z.string().min(1).max(280),
+    ctaText: z.string().min(1).max(24).optional(),
+    ctaUrl: safeLinkUrl,
+    imageUrl: z.union([safeLinkUrl, z.literal('')]).optional(),
+    isActive: z.boolean().optional(),
+  }),
+};
+
+export const updateSponsoredSchema = {
+  params: z.object({ id: z.string().min(1) }),
+  body: z
+    .object({
+      advertiser: z.string().min(1).max(80).optional(),
+      title: z.string().min(1).max(120).optional(),
+      body: z.string().min(1).max(280).optional(),
+      ctaText: z.string().min(1).max(24).optional(),
+      ctaUrl: safeLinkUrl.optional(),
+      imageUrl: z.union([safeLinkUrl, z.literal('')]).optional(),
+      isActive: z.boolean().optional(),
+    })
+    .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
 };

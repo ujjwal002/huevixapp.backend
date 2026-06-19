@@ -67,6 +67,19 @@ export const learnWord = asyncHandler(async (req, res) => {
 export const completeLadder = asyncHandler(async (req, res) => {
   const n = parseInt(req.params.n, 10);
   if (!n || n < 1) throw ApiError.badRequest('Invalid ladder');
+
+  // Same gate as getLadder: a ladder can only be completed once the previous
+  // one is finished, so the bulk-complete endpoint can't skip the progression.
+  if (n > 1) {
+    const prevTotal = await prisma.vocabWord.count({ where: { ladder: n - 1 } });
+    const prevLearned = await prisma.vocabProgress.count({
+      where: { userId: req.user.id, word: { ladder: n - 1 } },
+    });
+    if (prevTotal > 0 && prevLearned < prevTotal) {
+      throw ApiError.forbidden('Finish the previous ladder first', 'LADDER_LOCKED');
+    }
+  }
+
   const words = await prisma.vocabWord.findMany({ where: { ladder: n }, select: { id: true } });
   await prisma.$transaction(
     words.map((w) =>

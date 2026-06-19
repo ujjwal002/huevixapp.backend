@@ -1,8 +1,13 @@
 import { prisma } from '../db/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { getAppSettings } from '../services/settings.service.js';
 
-// Public — active ads only (used by the feed)
+// Public — active ads only (used by the feed). Returns nothing while the master
+// ad switch is OFF, so house ads can be held back at launch and turned on later
+// from the admin with no client change.
 export const listSponsored = asyncHandler(async (_req, res) => {
+  const { adsEnabled } = await getAppSettings();
+  if (!adsEnabled) return res.json({ items: [] });
   const items = await prisma.sponsoredCard.findMany({ where: { isActive: true }, orderBy: { createdAt: 'desc' } });
   res.json({ items });
 });

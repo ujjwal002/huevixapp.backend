@@ -24,3 +24,13 @@ export const speakingLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// High-frequency, low-value metric pings (promo impressions/clicks). Capped so
+// they can't be used to inflate counters or hammer the database.
+export const metricsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: { message: 'Too many requests', code: 'RATE_LIMITED' } },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

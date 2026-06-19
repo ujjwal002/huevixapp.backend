@@ -373,3 +373,14 @@ model PromoImpression {
   @@unique([promoId, userId])
   @@index([promoId])
 }
+
+
+// App-wide settings (single row, id = "singleton"). Master ad switch + feed
+// ad cadence, flippable live from the admin without a redeploy.
+model AppSettings {
+  id            String   @id @default("singleton")
+  adsEnabled    Boolean  @default(false)
+  adEveryNCards Int      @default(4)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

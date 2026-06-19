@@ -2,7 +2,7 @@ import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
-import { hashPassword, verifyPassword } from '../utils/password.js';
+import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from '../utils/password.js';
 import {
   signAccessToken,
   generateRefreshToken,
@@ -68,7 +68,12 @@ export const register = asyncHandler(async (req, res) => {
 export const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) throw ApiError.unauthorized('Invalid credentials', 'BAD_CREDENTIALS');
+  if (!user) {
+    // Do the same bcrypt work as a real verify so response time doesn't reveal
+    // whether the account exists, then fail with the same generic error.
+    await verifyPassword(password, DUMMY_PASSWORD_HASH);
+    throw ApiError.unauthorized('Invalid credentials', 'BAD_CREDENTIALS');
+  }
 
   const ok = await verifyPassword(password, user.passwordHash);
   if (!ok) throw ApiError.unauthorized('Invalid credentials', 'BAD_CREDENTIALS');
