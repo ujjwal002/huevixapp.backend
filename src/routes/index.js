@@ -10,6 +10,8 @@ import promoRoutes from './promo.routes.js';
 
 import settingsRoutes from './settings.routes.js';
 
+import { prisma } from '../db/prisma.js';
+
 
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
 import { getAppSettings } from '../services/settings.service.js';
@@ -22,8 +24,22 @@ import {
 
 const router = Router();
 
-router.get('/health', (_req, res) =>
-  res.json({ status: 'ok', mock: config.mockExternal, time: new Date().toISOString() })
+// Liveness + readiness. Pings the database so an orchestrator probe won't route
+// traffic to an instance that can't reach Postgres (returns 503 when it can't).
+router.get(
+  '/health',
+  asyncHandler(async (_req, res) => {
+    let db = 'ok';
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch {
+      db = 'down';
+    }
+    const status = db === 'ok' ? 'ok' : 'degraded';
+    res
+      .status(db === 'ok' ? 200 : 503)
+      .json({ status, db, mock: config.mockExternal, time: new Date().toISOString() });
+  })
 );
 
 // Public metadata: which languages + pricing the client should show, plus the

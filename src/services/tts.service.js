@@ -1,6 +1,8 @@
 import { config, languageMeta } from '../config/env.js';
 import { saveBuffer } from './storage.service.js';
 
+import { withTimeout } from '../utils/withTimeout.js';
+
 // Generates audio for a card's body (the "listen" feature) and stores it once.
 // You cache the result on the Card row, so each card costs TTS exactly once
 // regardless of how many users listen — this is your main cost lever.

@@ -1,5 +1,7 @@
 import { config, languageMeta, SUPPORTED_NATIVE_LANGUAGES } from '../config/env.js';
 
+import { withTimeout } from '../utils/withTimeout.js';
+
 // Generates an Inshorts-style short card (title + ~80-word body) in the target
 // language, plus a glossary of complex words with meanings in the native
 // language. In mock mode this returns deterministic sample data so the whole
@@ -57,8 +59,8 @@ export async function generateCard({ targetLanguage, nativeLanguage, level, topi
 
   // --- Real provider call (OpenAI) ---
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: config.ai.apiKey });
-  const completion = await client.chat.completions.create({
+  const client = new OpenAI({ apiKey: config.ai.apiKey, timeout: config.externalTimeoutMs, maxRetries: 2 });
+  const completion = await withTimeout(client.chat.completions.create({
     model: config.ai.model,
     max_tokens: 1200,
     // Forces a valid JSON object back (prompt must mention JSON, which it does).
@@ -70,7 +72,7 @@ export async function generateCard({ targetLanguage, nativeLanguage, level, topi
       },
       { role: 'user', content: buildPrompt({ targetLanguage, nativeLanguage, level, topic }) },
     ],
-  });
+  }), { label: 'content generation' });
   const text = completion.choices?.[0]?.message?.content || '{}';
   const clean = text.replace(/```json|```/g, '').trim();
   const parsed = JSON.parse(clean);
@@ -124,8 +126,8 @@ ${String(text).slice(0, 6000)}
 """`;
 
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: config.ai.apiKey });
-  const completion = await client.chat.completions.create({
+  const client = new OpenAI({ apiKey: config.ai.apiKey, timeout: config.externalTimeoutMs, maxRetries: 2 });
+  const completion = await withTimeout(client.chat.completions.create({
     model: config.ai.model,
     max_tokens: 1400,
     response_format: { type: 'json_object' },
@@ -133,7 +135,7 @@ ${String(text).slice(0, 6000)}
       { role: 'system', content: 'You summarize news for language learners. Reply with strict JSON only, no markdown.' },
       { role: 'user', content: prompt },
     ],
-  });
+  }));
   const txt = completion.choices?.[0]?.message?.content || '{}';
   const parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
   return { title: parsed.title, body: parsed.body, vocab: parsed.vocab || [] };

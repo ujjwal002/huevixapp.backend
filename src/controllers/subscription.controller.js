@@ -91,87 +91,88 @@ export const webhook = asyncHandler(async (req, res) => {
 
   const event = req.body?.event;
   const payload = req.body?.payload;
-
-  // Fix #9: idempotency. Record the provider event id first; if we've already
-  // handled it, acknowledge and skip. If processing throws, delete the marker
-  // so the provider's retry can reprocess.
   const eventId = req.headers['x-razorpay-event-id'];
-  if (eventId) {
-    try {
-      await prisma.processedWebhookEvent.create({
-        data: { id: String(eventId), eventType: event || 'unknown' },
-      });
-    } catch (e) {
-      if (e?.code === 'P2002') return res.json({ received: true, duplicate: true });
-      // Any other error: fall through and still attempt to process the event.
-    }
-  }
 
+  // Fix #9 (hardened): idempotency + side effects in ONE transaction. We record
+  // the provider event id and apply its effects atomically, so a crash between
+  // "marked handled" and "effect applied" can't permanently drop an event — if
+  // anything fails, the whole unit rolls back (marker included) and the
+  // provider's retry reprocesses cleanly. A duplicate delivery hits the unique
+  // constraint (P2002) and is acknowledged without reprocessing.
   try {
-    switch (event) {
-      case 'payment.captured': {
-        const orderId = payload?.payment?.entity?.order_id;
-        if (orderId) {
-          const sub = await prisma.subscription.findFirst({ where: { providerOrderId: orderId } });
-          if (sub && sub.status !== 'ACTIVE') {
-            await prisma.subscription.update({
-              where: { id: sub.id },
-              data: { status: 'ACTIVE', currentPeriodEnd: planPeriodEnd(sub.plan) },
+    await prisma.$transaction(async (tx) => {
+      if (eventId) {
+        await tx.processedWebhookEvent.create({
+          data: { id: String(eventId), eventType: event || 'unknown' },
+        });
+      }
+
+      switch (event) {
+        case 'payment.captured': {
+          const orderId = payload?.payment?.entity?.order_id;
+          if (orderId) {
+            const sub = await tx.subscription.findFirst({ where: { providerOrderId: orderId } });
+            if (sub && sub.status !== 'ACTIVE') {
+              await tx.subscription.update({
+                where: { id: sub.id },
+                data: { status: 'ACTIVE', currentPeriodEnd: planPeriodEnd(sub.plan) },
+              });
+            }
+          }
+          break;
+        }
+
+        case 'subscription.charged': {
+          const subId = payload?.subscription?.entity?.id;
+          if (subId) {
+            const s = await tx.subscription.findFirst({ where: { providerRefId: subId } });
+            if (s) {
+              await tx.subscription.update({
+                where: { id: s.id },
+                data: { status: 'ACTIVE', currentPeriodEnd: extendedPeriodEnd(s.plan, s.currentPeriodEnd) },
+              });
+            }
+          }
+          break;
+        }
+
+        case 'subscription.cancelled':
+        case 'subscription.halted':
+        case 'subscription.completed': {
+          const subId = payload?.subscription?.entity?.id;
+          if (subId) {
+            await tx.subscription.updateMany({
+              where: { providerRefId: subId },
+              data: { status: 'CANCELED' },
             });
           }
+          break;
         }
-        break;
-      }
 
-      case 'subscription.charged': {
-        const subId = payload?.subscription?.entity?.id;
-        if (subId) {
-          const s = await prisma.subscription.findFirst({ where: { providerRefId: subId } });
-          if (s) {
-            await prisma.subscription.update({
-              where: { id: s.id },
-              data: { status: 'ACTIVE', currentPeriodEnd: extendedPeriodEnd(s.plan, s.currentPeriodEnd) },
+        case 'refund.processed': {
+          const orderId = payload?.payment?.entity?.order_id;
+          if (orderId) {
+            await tx.subscription.updateMany({
+              where: { providerOrderId: orderId },
+              data: { status: 'CANCELED' },
             });
           }
+          break;
         }
-        break;
-      }
 
-      case 'subscription.cancelled':
-      case 'subscription.halted':
-      case 'subscription.completed': {
-        const subId = payload?.subscription?.entity?.id;
-        if (subId) {
-          await prisma.subscription.updateMany({
-            where: { providerRefId: subId },
-            data: { status: 'CANCELED' },
-          });
-        }
-        break;
+        default:
+          break; // event we don't act on
       }
-
-      case 'refund.processed': {
-        const orderId = payload?.payment?.entity?.order_id;
-        if (orderId) {
-          await prisma.subscription.updateMany({
-            where: { providerOrderId: orderId },
-            data: { status: 'CANCELED' },
-          });
-        }
-        break;
-      }
-
-      default:
-        break; // event we don't act on
-    }
+    });
   } catch (err) {
-    console.error('[WEBHOOK] handler error', err.message);
-    // Clear the idempotency marker so the retry can reprocess, and return 5xx so
-    // Razorpay actually retries. (Returning 200 here would tell the provider the
-    // event succeeded, permanently dropping e.g. a renewal or cancellation.)
-    if (eventId) {
-      await prisma.processedWebhookEvent.delete({ where: { id: String(eventId) } }).catch(() => {});
+    // Duplicate delivery: the marker insert hit the unique constraint. The
+    // event was already handled, so acknowledge and stop the retries.
+    if (err?.code === 'P2002') {
+      return res.json({ received: true, duplicate: true });
     }
+    // Genuine failure: the transaction rolled back (marker + effects), so it's
+    // safe to ask Razorpay to retry by returning a 5xx.
+    console.error('[WEBHOOK] handler error', err.message);
     return res.status(500).json({ received: false, error: 'WEBHOOK_PROCESSING_FAILED' });
   }
 

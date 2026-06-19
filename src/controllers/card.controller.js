@@ -11,6 +11,8 @@ import { saveBuffer } from '../services/storage.service.js';
 
 import {summarizeArticle} from '../services/ai.service.js';
 
+import { adminArticleVocabSchema } from '../validators/schemas.js';
+
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -206,7 +208,6 @@ export const generateAndCreateCard = asyncHandler(async (req, res) => {
 // create the article card, and synthesize audio for listen + speak.
 export const createArticleFromNews = asyncHandler(async (req, res) => {
 
-  console.log('Received article creation request with body:', req.body);
   if (!req.file) throw ApiError.badRequest('An image file is required (field "image")');
 
   const targetLanguage = req.body.targetLanguage || 'en';
@@ -239,6 +240,72 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
   });
 
   await generateAndAttachAudio(card.id, summarized.body, targetLanguage);
+  if (card.isPublished) await notifyNewCard(card);
+
+  const fresh = await prisma.card.findUnique({ where: { id: card.id }, include: { vocab: true } });
+  res.status(201).json(fresh);
+});
+
+// POST /cards/admin-article — admin WRITES the full article (title/body/vocab)
+// and uploads a hero image. No AI: the admin authors everything; we store the
+// image, create the card, synthesize audio (listen/speak), and publish. This is
+// the hand-written twin of createArticleFromNews (which AI-summarizes a story).
+export const createAdminArticle = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest('An image file is required (field "image")');
+
+  const targetLanguage = req.body.targetLanguage || 'en';
+  const nativeLanguage = req.body.nativeLanguage || 'hi';
+  const level = req.body.level || 'INTERMEDIATE';
+  const topic = req.body.topic?.trim() || 'article';
+  const sourceUrl = req.body.sourceUrl?.trim() || null;
+  const publish =
+    req.body.publish === undefined ? true : req.body.publish === true || req.body.publish === 'true';
+
+  // vocab is optional and arrives as a JSON string in the multipart form.
+  let vocab = [];
+  if (req.body.vocab) {
+    let parsed;
+    try {
+      parsed = JSON.parse(req.body.vocab);
+    } catch {
+      throw ApiError.badRequest('"vocab" must be valid JSON (an array of entries)', 'BAD_VOCAB');
+    }
+    const result = adminArticleVocabSchema.safeParse(parsed);
+    if (!result.success) throw ApiError.badRequest('Invalid vocab entries', 'BAD_VOCAB');
+    vocab = result.data;
+  }
+
+  const { url: imageUrl } = await saveBuffer(req.file.buffer, {
+    folder: 'images',
+    ext: imageExt(req.file.mimetype),
+  });
+
+  const card = await prisma.card.create({
+    data: {
+      targetLanguage,
+      level,
+      topic,
+      title: req.body.title.trim(),
+      body: req.body.body,
+      wordCount: countWords(req.body.body),
+      imageUrl,
+      sourceUrl,
+      isPublished: publish,
+      vocab: vocab.length
+        ? {
+            create: vocab.map((v) => ({
+              nativeLanguage,
+              term: v.term,
+              partOfSpeech: v.partOfSpeech,
+              meaning: v.meaning,
+              example: v.example,
+            })),
+          }
+        : undefined,
+    },
+  });
+
+  await generateAndAttachAudio(card.id, req.body.body, targetLanguage);
   if (card.isPublished) await notifyNewCard(card);
 
   const fresh = await prisma.card.findUnique({ where: { id: card.id }, include: { vocab: true } });
@@ -291,10 +358,15 @@ export const unsaveCard = asyncHandler(async (req, res) => {
 });
 
 // GET /cards/saved — list the user's bookmarked cards, newest first.
+// GET /cards/saved — list the user's bookmarked cards, newest first (paginated).
 export const listSavedCards = asyncHandler(async (req, res) => {
+  const limit = req.query.limit ?? 20;
+  const cursor = req.query.cursor;
   const saved = await prisma.savedCard.findMany({
     where: { userId: req.user.id },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: {
       card: {
         select: {
@@ -313,7 +385,15 @@ export const listSavedCards = asyncHandler(async (req, res) => {
       },
     },
   });
+
+  let nextCursor = null;
+  if (saved.length > limit) {
+    const next = saved.pop();
+    nextCursor = next.id;
+  }
+
   res.json({
     items: saved.map((s) => ({ ...s.card, saved: true, savedAt: s.createdAt })),
+    nextCursor,
   });
 });

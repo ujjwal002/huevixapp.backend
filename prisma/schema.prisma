@@ -81,6 +81,10 @@ model User {
   adCreditsGrantedToday        Int       @default(0) // credits GRANTED today; the real daily cap, never decremented on spend
 
 
+  paidSpeakingDate  DateTime? @db.Date
+  paidSpeakingCount Int       @default(0)
+
+
   notificationsReadAt DateTime?
   savedCards       SavedCard[]
 
@@ -96,7 +100,11 @@ model User {
 
   
 
+  
+
   @@index([targetLanguage])
+
+  @@index([longestStreak, currentStreak])
 }
 
 model RefreshToken {

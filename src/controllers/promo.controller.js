@@ -145,12 +145,24 @@ export const recordClick = asyncHandler(async (req, res) => {
 });
 
 // GET /promos/mine — the advertiser's own promos + performance numbers.
+// GET /promos/mine — the advertiser's own promos + performance numbers (paginated).
 export const listMyPromos = asyncHandler(async (req, res) => {
+  const limit = req.query.limit ?? 20;
+  const cursor = req.query.cursor;
   const promos = await prisma.startupPromo.findMany({
     where: { ownerId: req.user.id },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: { _count: { select: { impressions: true } } },
   });
+
+  let nextCursor = null;
+  if (promos.length > limit) {
+    const next = promos.pop();
+    nextCursor = next.id;
+  }
+
   const now = Date.now();
   res.json({
     items: promos.map((p) => ({
@@ -170,6 +182,7 @@ export const listMyPromos = asyncHandler(async (req, res) => {
       rejectionReason: p.rejectionReason,
       createdAt: p.createdAt,
     })),
+    nextCursor,
   });
 });
 

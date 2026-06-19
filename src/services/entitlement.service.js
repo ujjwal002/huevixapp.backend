@@ -12,32 +12,53 @@ import { startOfUtcDay, isSameUtcDay } from '../utils/dates.js';
 export function isSubscriptionActive(user) {
   const sub = user.subscription;
   return Boolean(
-    sub &&
-      sub.status === 'ACTIVE' &&
-      sub.currentPeriodEnd &&
-      new Date(sub.currentPeriodEnd) > new Date()
+    sub && sub.status === 'ACTIVE' && sub.currentPeriodEnd && new Date(sub.currentPeriodEnd) > new Date()
   );
 }
 
-export async function countTodaySpeaking(userId) {
-  const since = startOfUtcDay();
-  return prisma.speakingAttempt.count({
-    where: { userId, createdAt: { gte: since } },
+// Race-safe "reset this counter once per UTC day" primitive. The conditional
+// updateMany resets ONLY when the stored date isn't already today, so two
+// concurrent first-of-day requests can't both zero the row (the second matches
+// no rows). Returns true if this call performed the reset.
+async function resetIfNewDay(userId, { dateField, zeroFields }) {
+  const today = startOfUtcDay();
+  const data = { [dateField]: today };
+  for (const f of zeroFields) data[f] = 0;
+  const r = await prisma.user.updateMany({
+    where: { id: userId, OR: [{ [dateField]: null }, { [dateField]: { not: today } }] },
+    data,
   });
+  return r.count > 0;
 }
 
 // Reset a free user's ad credits at the start of each UTC day. Resets BOTH the
-// spendable balance and the daily-granted counter (Fix #8).
+// spendable balance and the daily-granted counter (Fix #8), concurrency-safely.
 export async function ensureDailyAdCredits(user) {
   const today = startOfUtcDay();
   if (!isSameUtcDay(user.adCreditsGrantedDate, today)) {
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: { adCreditsRemaining: 0, adCreditsGrantedToday: 0, adCreditsGrantedDate: today },
+    await resetIfNewDay(user.id, {
+      dateField: 'adCreditsGrantedDate',
+      zeroFields: ['adCreditsRemaining', 'adCreditsGrantedToday'],
     });
-    user.adCreditsRemaining = updated.adCreditsRemaining;
-    user.adCreditsGrantedToday = updated.adCreditsGrantedToday;
-    user.adCreditsGrantedDate = updated.adCreditsGrantedDate;
+    const fresh = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { adCreditsRemaining: true, adCreditsGrantedToday: true, adCreditsGrantedDate: true },
+    });
+    if (fresh) Object.assign(user, fresh);
+  }
+  return user;
+}
+
+// Reset the subscriber daily-speaking counter at the start of each UTC day.
+export async function ensureDailyPaidSpeaking(user) {
+  const today = startOfUtcDay();
+  if (!isSameUtcDay(user.paidSpeakingDate, today)) {
+    await resetIfNewDay(user.id, { dateField: 'paidSpeakingDate', zeroFields: ['paidSpeakingCount'] });
+    const fresh = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { paidSpeakingCount: true, paidSpeakingDate: true },
+    });
+    if (fresh) Object.assign(user, fresh);
   }
   return user;
 }
@@ -46,10 +67,10 @@ export async function getSpeakingAccess(user) {
   await ensureDailyAdCredits(user);
 
   if (isSubscriptionActive(user)) {
-    const usedToday = await countTodaySpeaking(user.id);
+    await ensureDailyPaidSpeaking(user);
     const limit = config.entitlement.paidDailySpeakingLimit;
-    if (usedToday < limit) {
-      return { allowed: true, source: 'SUBSCRIPTION', remainingToday: limit - usedToday };
+    if ((user.paidSpeakingCount ?? 0) < limit) {
+      return { allowed: true, source: 'SUBSCRIPTION', remainingToday: limit - (user.paidSpeakingCount ?? 0) };
     }
     return {
       allowed: false,
@@ -77,8 +98,11 @@ export async function getSpeakingAccess(user) {
 // paid assessment. The conditional `updateMany` only decrements when a credit
 // is actually available, so two concurrent requests cannot both spend the same
 // credit (the second one matches 0 rows). Returns true if a credit was taken.
-// SUBSCRIPTION usage is tracked by the SpeakingAttempt row count, so there is
-// nothing to reserve.
+//
+// For SUBSCRIPTION there is no stored balance, but the per-day cap is enforced
+// the same way: we atomically increment paidSpeakingCount only while it is below
+// the limit and dated today, so concurrent attempts can no longer overshoot the
+// daily cap (previously a count-then-create race).
 export async function reserveCredit(user, source) {
   if (source === 'TRIAL') {
     const r = await prisma.user.updateMany({
@@ -96,11 +120,22 @@ export async function reserveCredit(user, source) {
     if (r.count === 1) user.adCreditsRemaining -= 1;
     return r.count === 1;
   }
-  return true; // SUBSCRIPTION
+  if (source === 'SUBSCRIPTION') {
+    await ensureDailyPaidSpeaking(user);
+    const today = startOfUtcDay();
+    const limit = config.entitlement.paidDailySpeakingLimit;
+    const r = await prisma.user.updateMany({
+      where: { id: user.id, paidSpeakingDate: today, paidSpeakingCount: { lt: limit } },
+      data: { paidSpeakingCount: { increment: 1 } },
+    });
+    if (r.count === 1) user.paidSpeakingCount = (user.paidSpeakingCount ?? 0) + 1;
+    return r.count === 1;
+  }
+  return true;
 }
 
 // Fix #7: give a reserved credit back if the assessment fails, so a failed
-// external call never costs the user a credit.
+// external call never costs the user a credit (or a slot in their daily cap).
 export async function refundCredit(user, source) {
   if (source === 'TRIAL') {
     await prisma.user.update({
@@ -114,6 +149,14 @@ export async function refundCredit(user, source) {
       data: { adCreditsRemaining: { increment: 1 } },
     });
     user.adCreditsRemaining += 1;
+  } else if (source === 'SUBSCRIPTION') {
+    // Only give the daily slot back if one was actually consumed today.
+    const today = startOfUtcDay();
+    const r = await prisma.user.updateMany({
+      where: { id: user.id, paidSpeakingDate: today, paidSpeakingCount: { gt: 0 } },
+      data: { paidSpeakingCount: { decrement: 1 } },
+    });
+    if (r.count === 1) user.paidSpeakingCount = Math.max(0, (user.paidSpeakingCount ?? 1) - 1);
   }
 }
 
@@ -161,7 +204,8 @@ export async function grantAdCredit(user) {
 export async function getEntitlementSummary(user) {
   await ensureDailyAdCredits(user);
   const active = isSubscriptionActive(user);
-  const usedToday = active ? await countTodaySpeaking(user.id) : 0;
+  if (active) await ensureDailyPaidSpeaking(user);
+  const usedToday = active ? (user.paidSpeakingCount ?? 0) : 0;
   return {
     subscriptionActive: active,
     plan: user.subscription?.plan || null,

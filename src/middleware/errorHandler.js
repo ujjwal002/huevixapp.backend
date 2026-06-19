@@ -5,7 +5,7 @@ export function notFoundHandler(req, _res, next) {
 }
 
 // eslint-disable-next-line no-unused-vars
-export function errorHandler(err, _req, res, _next) {
+export function errorHandler(err, req, res, _next) {
   // Prisma unique-constraint -> 409
   if (err?.code === 'P2002') {
     return res.status(409).json({
@@ -30,8 +30,9 @@ export function errorHandler(err, _req, res, _next) {
   };
 
   if (statusCode === 500) {
-    // Log full error server-side, never leak to client.
-    console.error('[ERROR]', err);
+    // Log full error server-side (with the request id for correlation), never
+    // leak internals to the client.
+    console.error(`[ERROR] [req:${req?.id || '-'}]`, err);
   }
 
   res.status(statusCode).json(body);

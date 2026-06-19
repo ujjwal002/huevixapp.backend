@@ -139,6 +139,37 @@ export const createArticleSchema = {
   }),
 };
 
+// Admin-written article (multipart: a hero image file + these text fields). The
+// admin authors everything; no AI. `vocab` is sent as a JSON string in the
+// form and parsed in the controller against adminArticleVocabSchema below.
+export const createAdminArticleSchema = {
+  body: z.object({
+    title: z.string().min(1).max(120),
+    body: z.string().min(20).max(2000),
+    targetLanguage: targetEnum.optional(),
+    nativeLanguage: nativeEnum.optional(),
+    level: levelEnum.optional(),
+    topic: z.string().max(60).optional(),
+    sourceUrl: z.string().max(500).optional(),
+    publish: z.union([z.boolean(), z.string()]).optional(),
+    vocab: z.string().max(10000).optional(), // JSON string; parsed in controller
+  }),
+};
+
+// Shape of each vocab entry the admin supplies. Meanings are written in the
+// article's nativeLanguage and applied to every entry (same convention as the
+// AI news flow), so individual entries don't carry their own language.
+export const adminArticleVocabSchema = z
+  .array(
+    z.object({
+      term: z.string().min(1).max(100),
+      partOfSpeech: z.string().max(40).optional(),
+      meaning: z.string().min(1).max(300),
+      example: z.string().max(300).optional(),
+    })
+  )
+  .max(30);
+
 
 // ---- Startup promos (paid user ads) ----
 export const createPromoSchema = {
@@ -213,4 +244,31 @@ export const updateSponsoredSchema = {
       isActive: z.boolean().optional(),
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
+};
+
+
+// Rewarded-ad claim. token/signature are optional so the mock/dev flow keeps
+// working with an empty body; in production ad.service verifies them and the
+// endpoint fails closed if they're missing/invalid.
+export const adRewardSchema = {
+  body: z.object({
+    token: z.string().min(1).max(512).optional(),
+    signature: z.string().min(1).max(256).optional(),
+  }),
+};
+
+// Cursor pagination for /cards/saved (cursor = SavedCard row id, a uuid).
+export const savedCardsQuerySchema = {
+  query: z.object({
+    cursor: z.string().uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  }),
+};
+
+// Cursor pagination for /promos/mine (cursor = StartupPromo id, a cuid string).
+export const promosMineQuerySchema = {
+  query: z.object({
+    cursor: z.string().min(8).max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  }),
 };

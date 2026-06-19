@@ -3,6 +3,8 @@ import { config } from '../config/env.js';
 
 import { ApiError } from '../utils/ApiError.js';
 
+import { withTimeout } from '../utils/withTimeout.js';
+
 // Razorpay is the standard payment gateway for India. In mock mode we fabricate
 // order ids and accept any signature so you can test the subscription flow
 // end-to-end without a Razorpay account.
@@ -95,12 +97,12 @@ export async function createRecurringSubscription({ planId, userId, totalCount =
   const { default: Razorpay } = await import('razorpay');
   const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });
   try {
-    const sub = await instance.subscriptions.create({
+    const sub = await withTimeout(instance.subscriptions.create({
       plan_id: planId,
       total_count: totalCount,   // number of monthly cycles (120 ≈ "ongoing")
       customer_notify: 1,
       notes: { userId },
-    });
+    }), { label: 'Razorpay subscription create' });
     return { subscriptionId: sub.id, keyId: config.razorpay.keyId };
   } catch (e) {
     console.error('[razorpay] subscription create failed:', e?.error?.description || e?.message || e);
@@ -125,7 +127,7 @@ export async function cancelRecurringSubscription(subscriptionId) {
   const { default: Razorpay } = await import('razorpay');
   const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });
   try {
-    await instance.subscriptions.cancel(subscriptionId, false); // cancel immediately
+    await withTimeout(instance.subscriptions.cancel(subscriptionId, false), { label: 'Razorpay subscription cancel' }); // cancel immediately
   } catch (e) {
     console.error('[razorpay] cancel failed:', e?.error?.description || e?.message || e);
     // don't throw — we still cancel locally
@@ -148,12 +150,12 @@ export async function createPromoOrder({ amountPaise, userId, promoId }) {
   const { default: Razorpay } = await import('razorpay');
   const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });
   try {
-    const order = await instance.orders.create({
+    const order = await withTimeout(instance.orders.create({
       amount: amountPaise,
       currency: 'INR',
       receipt: `promo_${Date.now()}`,
       notes: { userId, promoId, kind: 'startup_promo' },
-    });
+    }), { label: 'Razorpay promo order create' });
     return { orderId: order.id, amount: order.amount, currency: order.currency, keyId: config.razorpay.keyId };
   } catch (e) {
     console.error('[razorpay] promo order create failed:', e?.error?.description || e?.message || e);
@@ -169,7 +171,7 @@ export async function refundPayment(paymentId, amountPaise) {
   const { default: Razorpay } = await import('razorpay');
   const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });
   try {
-    const refund = await instance.payments.refund(paymentId, { amount: amountPaise });
+    const refund = await withTimeout(instance.payments.refund(paymentId, { amount: amountPaise }), { label: 'Razorpay refund' });
     return { refundId: refund.id };
   } catch (e) {
     console.error('[razorpay] refund failed:', e?.error?.description || e?.message || e);

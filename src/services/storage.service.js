@@ -106,4 +106,31 @@ export async function getPresignedDownloadUrl(key, { expiresIn = 300 } = {}) {
   );
 }
 
+// Delete a stored object by its key (driver-correct). Used by retention jobs
+// (e.g. pruning old recordings). Best-effort: returns true on success, false if
+// the object was missing or the key was unsafe — never throws on "not found".
+export async function deleteObject(key) {
+  if (!key) return false;
+
+  if (isS3()) {
+    const { DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+    const client = await s3Client();
+    try {
+      await client.send(new DeleteObjectCommand({ Bucket: config.storage.s3.bucket, Key: key }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const resolved = resolveLocalPath(key);
+  if (!resolved) return false; // unsafe key or already gone
+  try {
+    await fs.unlink(resolved);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const STORAGE_ROOT = ROOT;

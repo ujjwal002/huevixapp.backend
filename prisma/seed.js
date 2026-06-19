@@ -4,7 +4,10 @@ import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash('Password123', 10);
+  // Match the app's configured bcrypt cost (BCRYPT_ROUNDS, default 12) so
+  // seeded accounts are hashed consistently with ones created via /register.
+  const rounds = parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12;
+  const passwordHash = await bcrypt.hash('Password123', rounds);
 
   const admin = await prisma.user.upsert({
     where: { email: 'admin@lingoshorts.app' },

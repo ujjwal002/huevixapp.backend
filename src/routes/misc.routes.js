@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { checkoutSchema, verifyPaymentSchema } from '../validators/schemas.js';
+import { checkoutSchema, verifyPaymentSchema, adRewardSchema } from '../validators/schemas.js';
 import * as speaking from '../controllers/speaking.controller.js';
 import * as ads from '../controllers/ads.controller.js';
 import * as sub from '../controllers/subscription.controller.js';
 import * as notif from '../controllers/notification.controller.js';
+
+
 
 const speakingRouter = Router();
 speakingRouter.use(requireAuth);
@@ -15,7 +17,7 @@ speakingRouter.get('/recordings/:id', speaking.getRecording);
 
 const adsRouter = Router();
 adsRouter.use(requireAuth);
-adsRouter.post('/reward', ads.claimAdReward);
+adsRouter.post('/reward', validate(adRewardSchema), ads.claimAdReward);
 
 const notificationRouter = Router();
 notificationRouter.use(requireAuth);

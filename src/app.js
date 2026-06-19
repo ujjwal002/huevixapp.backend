@@ -8,6 +8,8 @@ import routes from './routes/index.js';
 import { webhook } from './controllers/subscription.controller.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { globalLimiter } from './middleware/rateLimit.js';
+
+import { requestId } from './middleware/requestId.js';
 import { STORAGE_ROOT } from './services/storage.service.js';
 
 const app = express();
@@ -18,6 +20,9 @@ const app = express();
 // limiters become a single global bucket (one attacker locks everyone out).
 app.set('trust proxy', config.trustProxy);
 
+// Correlate logs/responses with a request id (before logging so it's captured).
+app.use(requestId);
+
 // Use helmet's secure defaults (same-origin Cross-Origin-Resource-Policy). CORP
 // is relaxed to cross-origin ONLY on the /static mount below, so generated TTS
 // audio can be loaded by the frontend (port 5173) without weakening every
@@ -27,12 +32,29 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin || config.corsOrigins.includes(origin)) return cb(null, true);
-      cb(new Error('Not allowed by CORS'));
+      // Surface a clean 403 (not a generic 500) for disallowed origins.
+      const err = new Error('Not allowed by CORS');
+      err.statusCode = 403;
+      err.code = 'CORS_NOT_ALLOWED';
+      cb(err);
     },
     credentials: true,
   })
 );
-if (config.env !== 'test') app.use(morgan('dev'));
+// Logging: concise 'dev' format locally; structured, request-id-tagged lines in
+// production (skip the noisy /health probe).
+if (config.env !== 'test') {
+  if (config.env === 'production') {
+    morgan.token('id', (req) => req.id);
+    app.use(
+      morgan(':id :remote-addr :method :url :status :res[content-length] - :response-time ms', {
+        skip: (req) => req.originalUrl === `${config.apiPrefix}/health`,
+      })
+    );
+  } else {
+    app.use(morgan('dev'));
+  }
+}
 
 // Razorpay webhook MUST receive the raw body for signature verification, so it
 // is mounted BEFORE the JSON body parser, with its own raw parser.

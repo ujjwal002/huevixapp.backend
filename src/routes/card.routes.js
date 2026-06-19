@@ -10,6 +10,8 @@ import {
   generateCardSchema,
   completeCardSchema,
   createArticleSchema,
+  savedCardsQuerySchema,
+  createAdminArticleSchema
 } from '../validators/schemas.js';
 import * as card from '../controllers/card.controller.js';
 import * as speaking from '../controllers/speaking.controller.js';
@@ -30,7 +32,7 @@ const upload = multer({
 router.get('/feed', optionalAuth, validate(feedQuerySchema), card.getFeed);
 
 // '/saved' MUST come before '/:id', or it gets captured as an id.
-router.get('/saved', requireAuth, card.listSavedCards);
+router.get('/saved', requireAuth, validate(savedCardsQuerySchema), card.listSavedCards);
 
 // Public single card (placed after /saved so it isn't shadowed)
 router.get('/:id', optionalAuth, validate(cardIdParam), card.getCard);
@@ -70,6 +72,17 @@ router.post(
   imageUpload.single('image'),
   validate(createArticleSchema),
   card.createArticleFromNews
+);
+
+// Admin-written article: admin authors title/body/vocab and uploads a hero
+// image (no AI). multer must run before validate so the text fields are parsed.
+router.post(
+  '/admin-article',
+  requireAuth,
+  requireAdmin,
+  imageUpload.single('image'),
+  validate(createAdminArticleSchema),
+  card.createAdminArticle
 );
 
 export default router;

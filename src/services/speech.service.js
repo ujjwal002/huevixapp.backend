@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+import { withTimeout } from '../utils/withTimeout.js';
+
 // THE CORE FEATURE. Takes the user's recording + the card's reference text and
 // returns scores plus a per-word breakdown ("what you did great / wrong").
 //
@@ -38,9 +40,17 @@ async function toPcm16kMono(inputBuffer) {
       const args = ['-y', '-i', inFile, '-ar', '16000', '-ac', '1', '-f', 's16le', '-acodec', 'pcm_s16le', outFile];
       const proc = spawn(bin, args);
       let err = '';
+      let settled = false;
+      const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(killTimer); fn(arg); } };
+      // Bound transcode time and hard-kill a stuck ffmpeg so it can't pin a worker.
+      const killTimer = setTimeout(() => {
+        proc.kill('SIGKILL');
+        done(reject, new Error(`ffmpeg transcode timed out after ${config.externalTimeoutMs}ms`));
+      }, config.externalTimeoutMs);
+      if (typeof killTimer.unref === 'function') killTimer.unref();
       proc.stderr.on('data', (d) => { err += d.toString(); });
-      proc.on('error', (e) => reject(new Error(`ffmpeg not runnable (${e.message}). Install ffmpeg-static or system ffmpeg.`)));
-      proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg transcode failed: ' + err.slice(-400)))));
+      proc.on('error', (e) => done(reject, new Error(`ffmpeg not runnable (${e.message}). Install ffmpeg-static or system ffmpeg.`)));
+      proc.on('close', (code) => (code === 0 ? done(resolve) : done(reject, new Error('ffmpeg transcode failed: ' + err.slice(-400)))));
     });
     return await readFile(outFile);
   } finally {
@@ -85,15 +95,22 @@ export async function assessPronunciation({ audioBuffer, referenceText, targetLa
   const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
   paConfig.applyTo(recognizer);
 
-  const result = await new Promise((resolve, reject) => {
-    recognizer.recognizeOnceAsync((r) => {
-      recognizer.close();
-      resolve(r);
-    }, (e) => {
-      recognizer.close();
-      reject(e);
-    });
-  });
+  let result;
+  try {
+    result = await withTimeout(
+      new Promise((resolve, reject) => {
+        recognizer.recognizeOnceAsync(
+          (r) => resolve(r),
+          (e) => reject(e)
+        );
+      }),
+      { ms: config.externalTimeoutMs, label: 'pronunciation assessment' }
+    );
+  } finally {
+    // Always release the recognizer, including on timeout (when neither
+    // callback fires), so the native handle and push stream can't leak.
+    try { recognizer.close(); } catch { /* already closed */ }
+  }
 
   const pa = sdk.PronunciationAssessmentResult.fromResult(result);
   const words = (pa.detailResult?.Words || []).map((w) => ({

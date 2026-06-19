@@ -34,3 +34,13 @@ export const metricsLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Creating a promo mints a real payment-gateway order each call. Cap it so a
+// single account can't spam draft promos / orphan orders.
+export const promoCreateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 20,
+  message: { error: { message: 'Too many promo drafts, try again later', code: 'RATE_LIMITED' } },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

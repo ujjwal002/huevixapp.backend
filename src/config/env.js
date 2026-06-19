@@ -83,6 +83,19 @@ export const config = {
     key: process.env.AZURE_SPEECH_KEY,
     region: process.env.AZURE_SPEECH_REGION || 'centralindia',
   },
+
+  // Hard deadline (ms) for any single outbound call to a paid/3rd-party API
+  // (OpenAI, Azure TTS, Azure pronunciation assessment, Razorpay). These run
+  // inline on request handlers, so without a deadline a hung upstream would pin
+  // a worker indefinitely. On timeout the caller gets a clean 503.
+  externalTimeoutMs: int(process.env.EXTERNAL_TIMEOUT_MS, 25_000),
+
+  // Rewarded-ad verification. The client forwards a signed reward token; we
+  // verify it before granting a credit so the endpoint can't be spoofed with an
+  // empty request. Mock mode skips it; production with no secret FAILS CLOSED.
+  ads: {
+    rewardSecret: process.env.AD_REWARD_SECRET || process.env.ADMOB_SSV_SECRET || null,
+  },
   storage: {
     driver: STORAGE_DRIVER, // 'local' | 's3'  — the one switch
     publicBaseUrl: (process.env.STORAGE_PUBLIC_BASE_URL || defaultPublicBase()).replace(/\/$/, ''),
