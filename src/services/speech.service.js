@@ -198,3 +198,48 @@ function buildFeedback({ overall, words }) {
       : 'No major problem words — push for smoother flow next.',
   };
 }
+
+
+// Plain speech-to-text (no pronunciation scoring) for the vocab tutor: we only
+// need WHAT the learner said to judge their answer, which is far cheaper than
+// the pronunciation-assessment endpoint. Defaults to Hindi (hi-IN) since the
+// tutor converses in Hindi; learners often code-mix English words, which the
+// recognizer + the LLM judge tolerate. Mock mode returns a canned phrase.
+export async function transcribeOnce({ audioBuffer, locale = 'hi-IN' }) {
+  if (config.mockExternal || !config.azureSpeech.key) {
+    return { text: 'मॉक उत्तर', _mock: true };
+  }
+
+  const sdk = await import('microsoft-cognitiveservices-speech-sdk');
+  const speechConfig = sdk.SpeechConfig.fromSubscription(
+    config.azureSpeech.key,
+    config.azureSpeech.region
+  );
+  speechConfig.speechRecognitionLanguage = locale;
+
+  const pcm = await toPcm16kMono(audioBuffer);
+  const pushStream = sdk.AudioInputStream.createPushStream();
+  pushStream.write(pcm);
+  pushStream.close();
+  const audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
+  const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+
+  try {
+    const result = await withTimeout(
+      new Promise((resolve, reject) => {
+        recognizer.recognizeOnceAsync(
+          (r) => resolve(r),
+          (e) => reject(e)
+        );
+      }),
+      { ms: config.externalTimeoutMs, label: 'speech transcription' }
+    );
+    return { text: result?.text || '' };
+  } finally {
+    try {
+      recognizer.close();
+    } catch {
+      /* already closed */
+    }
+  }
+}

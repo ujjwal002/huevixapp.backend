@@ -10,7 +10,11 @@ import promoRoutes from './promo.routes.js';
 
 import settingsRoutes from './settings.routes.js';
 
+import vocabTutorRoutes from './vocabTutor.routes.js';
+
 import { prisma } from '../db/prisma.js';
+
+
 
 
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
@@ -75,5 +79,7 @@ router.use('/sponsored', sponsoredRoutes);
 router.use('/promos', promoRoutes);
 
 router.use('/admin/settings', settingsRoutes);
+
+router.use('/vocab-tutor', vocabTutorRoutes);
 
 export default router;

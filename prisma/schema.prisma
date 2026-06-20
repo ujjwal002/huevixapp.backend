@@ -98,6 +98,8 @@ model User {
   vocabProgress VocabProgress[]
   startupPromos StartupPromo[]
 
+  vocabTutorSessions VocabTutorSession[]
+
   
 
   
@@ -269,6 +271,9 @@ model VocabWord {
   createdAt    DateTime        @default(now())
   progress     VocabProgress[]
 
+  audioUrl     String? // cached English TTS (word + example), generated once, reused for all users
+
+
   @@index([ladder])
 }
 
@@ -280,7 +285,33 @@ model VocabProgress {
   word      VocabWord @relation(fields: [wordId], references: [id], onDelete: Cascade)
   learnedAt DateTime  @default(now())
 
+  // Spaced-repetition memory state (the "AI knows what you remember" part).
+  strength        Int       @default(0) // Leitner box 0..5; higher = remembered longer
+  timesTested     Int       @default(0)
+  timesCorrect    Int       @default(0)
+  consecutiveHits Int       @default(0) // resets to 0 on a miss
+  lastTestedAt    DateTime?
+  dueAt           DateTime? // next time this word is eligible to be quizzed
+
   @@unique([userId, wordId])
+  @@index([userId, dueAt])
+}
+
+model VocabTutorSession {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day          DateTime  @db.Date
+  state        Json // { phase, quiz[], qi, awaitingRetry, teach[], ti }
+  taughtCount  Int       @default(0)
+  quizzedCount Int       @default(0)
+  correctCount Int       @default(0)
+  turns        Int       @default(0) // cost guard: hard cap per session
+  endedAt      DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@unique([userId, day])
+  @@index([userId, createdAt])
 }
 
 

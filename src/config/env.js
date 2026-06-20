@@ -96,6 +96,26 @@ export const config = {
   ads: {
     rewardSecret: process.env.AD_REWARD_SECRET || process.env.ADMOB_SSV_SECRET || null,
   },
+
+  // Conversational vocab tutor (the strict Hindi roaster). Voice + lesson sizing
+  // and a hard per-session turn cap so one session can't run up unbounded cost.
+  tutor: {
+    hindiVoice: process.env.TUTOR_HINDI_VOICE || 'hi-IN-MadhurNeural',
+    hindiPitch: process.env.TUTOR_HINDI_PITCH || '+22%', // raise for a younger / boyish voice
+    hindiRate: process.env.TUTOR_HINDI_RATE || '+3%',
+    newWordsPerDay: int(process.env.TUTOR_NEW_WORDS_PER_DAY, 20),
+    quizCount: int(process.env.TUTOR_QUIZ_COUNT, 6),
+    maxTurnsPerSession: int(process.env.TUTOR_MAX_TURNS, 80),
+  },
+
+
+    elevenLabs: {
+    apiKey: process.env.ELEVENLABS_API_KEY || null,
+    voiceId: process.env.ELEVENLABS_VOICE_ID || null,
+    modelId: process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2',
+  },
+
+
   storage: {
     driver: STORAGE_DRIVER, // 'local' | 's3'  — the one switch
     publicBaseUrl: (process.env.STORAGE_PUBLIC_BASE_URL || defaultPublicBase()).replace(/\/$/, ''),
@@ -186,4 +206,15 @@ export function isSupportedNative(code) {
 }
 export function languageMeta(code) {
   return SUPPORTED_LANGUAGES[code] || null;
+}
+
+// One-line boot signal so it's obvious which TTS provider the tutor will use.
+if (!config.mockExternal) {
+  const ttsProvider =
+    config.elevenLabs.apiKey && config.elevenLabs.voiceId
+      ? 'ElevenLabs'
+      : config.azureSpeech.key
+        ? 'Azure'
+        : 'mock';
+  console.log(`[tts] tutor voice provider: ${ttsProvider}`);
 }
