@@ -218,3 +218,123 @@ export async function getEntitlementSummary(user) {
     paidUsedToday: usedToday,
   };
 }
+// ===========================================================================
+// Practice-call credits — prepaid "recharge" balance + a free daily allowance.
+// Independent of the speaking subscription. Metered in SECONDS.
+// ===========================================================================
+
+// Reset the free daily call allowance at the start of each UTC day (same
+// race-safe primitive used for ad credits / paid speaking).
+export async function ensureDailyCallSeconds(user) {
+  const today = startOfUtcDay();
+  if (!isSameUtcDay(user.callSecondsDate, today)) {
+    await resetIfNewDay(user.id, {
+      dateField: 'callSecondsDate',
+      zeroFields: ['callSecondsUsedToday'],
+    });
+    const fresh = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { callSecondsUsedToday: true, callSecondsDate: true },
+    });
+    if (fresh) Object.assign(user, fresh);
+  }
+  return user;
+}
+
+function callSummaryFrom(user) {
+  const freeDaily = config.calls.freeDailySeconds;
+  const usedToday = user.callSecondsUsedToday ?? 0;
+  const balance = user.callSecondsBalance ?? 0;
+  const freeLeft = Math.max(0, freeDaily - usedToday);
+  const totalLeft = freeLeft + balance;
+  return {
+    freeDailySeconds: freeDaily,
+    freeSecondsLeft: freeLeft,
+    balanceSeconds: balance,
+    totalSecondsLeft: totalLeft,
+    minStartSeconds: config.calls.minStartSeconds,
+    canStartCall: totalLeft >= config.calls.minStartSeconds,
+  };
+}
+
+export async function getCallCreditSummary(user) {
+  await ensureDailyCallSeconds(user);
+  return callSummaryFrom(user);
+}
+
+export async function getCallAccess(user) {
+  await ensureDailyCallSeconds(user);
+  const summary = callSummaryFrom(user);
+  if (summary.canStartCall) return { allowed: true, ...summary };
+  return {
+    allowed: false,
+    reason: 'NO_CALL_BALANCE',
+    message: 'You are out of call minutes. Recharge to keep practising.',
+    ...summary,
+  };
+}
+
+// Realtime layer only knows the userId, so load the credit fields and check.
+export async function getCallAccessById(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      callSecondsBalance: true,
+      callSecondsUsedToday: true,
+      callSecondsDate: true,
+    },
+  });
+  if (!user) return { allowed: false, reason: 'USER_NOT_FOUND', message: 'User not found' };
+  return getCallAccess(user);
+}
+
+// After a call ends, spend the FREE daily allowance first, then the prepaid
+// balance. Best-effort post-call accounting (not a pre-call reserve), so a
+// single call can at most slightly overshoot before the next gate stops them.
+export async function consumeCallSeconds(userId, seconds) {
+  const secs = Math.max(0, Math.round(seconds || 0));
+  if (secs === 0) return;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      callSecondsBalance: true,
+      callSecondsUsedToday: true,
+      callSecondsDate: true,
+    },
+  });
+  if (!user) return;
+  await ensureDailyCallSeconds(user);
+
+  const freeDaily = config.calls.freeDailySeconds;
+  const freeLeft = Math.max(0, freeDaily - (user.callSecondsUsedToday ?? 0));
+  const fromFree = Math.min(secs, freeLeft);
+  const fromBalance = Math.min(secs - fromFree, user.callSecondsBalance ?? 0);
+
+  const data = {};
+  if (fromFree > 0) data.callSecondsUsedToday = { increment: fromFree };
+  if (fromBalance > 0) data.callSecondsBalance = { decrement: fromBalance };
+  if (Object.keys(data).length) {
+    await prisma.user.update({ where: { id: userId }, data });
+  }
+}
+
+// Recharge: add prepaid call seconds. Returns the new prepaid balance.
+export async function addCallSeconds(userId, seconds) {
+  const secs = Math.max(0, Math.round(seconds || 0));
+  if (secs === 0) {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { callSecondsBalance: true },
+    });
+    return u?.callSecondsBalance ?? 0;
+  }
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { callSecondsBalance: { increment: secs } },
+    select: { callSecondsBalance: true },
+  });
+  return updated.callSecondsBalance;
+}

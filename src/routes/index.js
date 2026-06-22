@@ -12,6 +12,8 @@ import settingsRoutes from './settings.routes.js';
 
 import vocabTutorRoutes from './vocabTutor.routes.js';
 
+import callsRoutes from './calls.routes.js';
+
 import { prisma } from '../db/prisma.js';
 
 
@@ -81,5 +83,7 @@ router.use('/promos', promoRoutes);
 router.use('/admin/settings', settingsRoutes);
 
 router.use('/vocab-tutor', vocabTutorRoutes);
+
+router.use('/calls', callsRoutes);
 
 export default router;

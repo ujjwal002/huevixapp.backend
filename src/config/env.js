@@ -133,6 +133,31 @@ export const config = {
     planMonthly: process.env.RAZORPAY_PLAN_MONTHLY,
   },
 
+  // Realtime practice calling: WebRTC ICE servers + signaling.
+  // STUN is free and discovers public addresses; TURN relays media when a
+  // direct peer-to-peer path fails (essential on mobile/cellular). coturn runs
+  // in `use-auth-secret` mode and accepts the short-lived HMAC credentials we
+  // sign per-request (see calls.controller.js), so no static TURN password is
+  // ever shipped in the app. Leave TURN_* unset in dev to run STUN-only on LAN.
+  realtime: {
+    stunUrls: (process.env.STUN_URLS || 'stun:stun.l.google.com:19302')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    turnUrls: (process.env.TURN_URLS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    turnStaticSecret: process.env.TURN_STATIC_SECRET || null,
+    turnCredentialTtlSec: int(process.env.TURN_CRED_TTL_SECONDS, 86_400),
+  },
+
+  calls: {
+    freeDailySeconds: int(process.env.FREE_DAILY_CALL_SECONDS, 600),
+    minStartSeconds: int(process.env.MIN_CALL_START_SECONDS, 20),
+    rechargePacks: { mins_30: 1800, mins_60: 3600, mins_120: 7200 },
+  },
+
   // Minor fix: default CORS origin now matches the Vite dev frontend (5173)
   // referenced elsewhere in the app, plus the old 3000 default.
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000')

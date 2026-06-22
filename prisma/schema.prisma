@@ -98,7 +98,19 @@ model User {
   vocabProgress VocabProgress[]
   startupPromos StartupPromo[]
 
+  callSecondsBalance   Int       @default(0)
+  callSecondsUsedToday Int       @default(0)
+  callSecondsDate      DateTime? @db.Date
+
   vocabTutorSessions VocabTutorSession[]
+
+  callsMade     Call[] @relation("CallsMade")
+  callsReceived Call[] @relation("CallsReceived")
+
+  blocksMade      Block[]  @relation("BlocksMade")
+  blocksReceived  Block[]  @relation("BlocksReceived")
+  reportsMade     Report[] @relation("ReportsMade")
+  reportsReceived Report[] @relation("ReportsReceived")
 
   
 
@@ -422,4 +434,96 @@ model AppSettings {
   adEveryNCards Int      @default(4)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+
+// ---------------------------------------------------------------------------
+// Practice calling — 1:1 audio/video "Find People" sessions
+// ---------------------------------------------------------------------------
+
+enum CallType {
+  AUDIO
+  VIDEO
+}
+
+enum CallStatus {
+  CONNECTING // matched; WebRTC handshake in progress
+  ACTIVE     // media negotiated; the two are actually talking
+  ENDED      // finished normally (either side hung up / disconnected after ACTIVE)
+  MISSED     // matched but never connected (handshake failed / left immediately)
+}
+
+// One row per matched practice call. caller = the side that sent the first
+// WebRTC offer (the user who was already waiting when the match happened).
+model Call {
+  id          String     @id @default(uuid())
+  callerId    String
+  calleeId    String
+  type        CallType   @default(VIDEO)
+  status      CallStatus @default(CONNECTING)
+  startedAt   DateTime   @default(now())
+  endedAt     DateTime?
+  durationSec Int?
+
+  caller User @relation("CallsMade", fields: [callerId], references: [id], onDelete: Cascade)
+  callee User @relation("CallsReceived", fields: [calleeId], references: [id], onDelete: Cascade)
+
+  reports Report[]
+
+  @@index([callerId, startedAt])
+  @@index([calleeId, startedAt])
+}
+
+
+// ---------------------------------------------------------------------------
+// Safety — blocking + reporting for practice calls
+// ---------------------------------------------------------------------------
+
+enum ReportReason {
+  HARASSMENT
+  SEXUAL_CONTENT
+  UNDERAGE
+  HATE
+  SPAM
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  ACTIONED
+}
+
+// A one-directional block. Enforced BOTH ways at match time (see matchmaking).
+model Block {
+  id            String   @id @default(uuid())
+  userId        String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+
+  user    User @relation("BlocksMade", fields: [userId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlocksReceived", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, blockedUserId])
+  @@index([blockedUserId])
+}
+
+// A user report, optionally tied to the call it happened on. Reporting also
+// creates a Block (handled in safety.service.js) so the pair won't rematch.
+model Report {
+  id             String       @id @default(uuid())
+  reporterId     String
+  reportedUserId String
+  callId         String?
+  reason         ReportReason @default(OTHER)
+  note           String?
+  status         ReportStatus @default(PENDING)
+  createdAt      DateTime     @default(now())
+
+  reporter User  @relation("ReportsMade", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User  @relation("ReportsReceived", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  call     Call? @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  @@index([reportedUserId, status])
+  @@index([status, createdAt])
 }
