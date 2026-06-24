@@ -23,6 +23,8 @@ const notificationRouter = Router();
 notificationRouter.use(requireAuth);
 notificationRouter.get('/', notif.listNotifications);
 notificationRouter.post('/read', notif.markNotificationsRead);
+notificationRouter.post('/devices', notif.registerDevice);
+notificationRouter.delete('/devices', notif.unregisterDevice);
 
 const subRouter = Router();
 // NOTE: webhook is mounted separately (raw body) in routes/index.js — not here.

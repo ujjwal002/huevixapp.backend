@@ -14,6 +14,10 @@ node prisma/seed-grammar.js
 node prisma/seed-sponsored.js
 
 
+npx prisma db push
+pm2 restart huevix-backend
+
+
 curl -X POST http://localhost:4000/api/v1/cards/admin-article \
   -H "Authorization: Bearer <ADMIN_ACCESS_TOKEN>" \
   -F "image=@hero.jpg" \

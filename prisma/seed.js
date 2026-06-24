@@ -13,7 +13,7 @@ async function main() {
     where: { email: 'admin@lingoshorts.app' },
     update: {},
     create: {
-      email: 'admin@lingoshorts.app',
+      email: 'admin@huevix.app',
       passwordHash,
       name: 'Admin',
       role: 'ADMIN',
@@ -23,10 +23,10 @@ async function main() {
   });
 
   await prisma.user.upsert({
-    where: { email: 'learner@lingoshorts.app' },
+    where: { email: 'learner@huevix.app' },
     update: {},
     create: {
-      email: 'learner@lingoshorts.app',
+      email: 'learner@huevix.app',
       passwordHash,
       name: 'Test Learner',
       role: 'USER',

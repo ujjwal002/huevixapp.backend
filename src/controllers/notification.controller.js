@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
 
 // GET /notifications — recent notifications + how many are unread for this user.
 export const listNotifications = asyncHandler(async (req, res) => {
@@ -30,5 +31,28 @@ export const markNotificationsRead = asyncHandler(async (req, res) => {
     where: { id: req.user.id },
     data: { notificationsReadAt: new Date() },
   });
+  res.json({ success: true });
+});
+
+// POST /notifications/devices — register (or refresh) this device's push token.
+// Upsert by token so re-registering the same device just bumps lastSeenAt and
+// re-links it to the current user.
+export const registerDevice = asyncHandler(async (req, res) => {
+  const { token, platform } = req.body || {};
+  if (!token || typeof token !== 'string') {
+    throw ApiError.badRequest('A device push token is required');
+  }
+  await prisma.deviceToken.upsert({
+    where: { token },
+    create: { token, platform: platform || null, userId: req.user.id, lastSeenAt: new Date() },
+    update: { platform: platform || null, userId: req.user.id, lastSeenAt: new Date() },
+  });
+  res.json({ success: true });
+});
+
+// DELETE /notifications/devices — drop this device's token (call on logout).
+export const unregisterDevice = asyncHandler(async (req, res) => {
+  const { token } = req.body || {};
+  if (token) await prisma.deviceToken.deleteMany({ where: { token } });
   res.json({ success: true });
 });

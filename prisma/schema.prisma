@@ -98,6 +98,8 @@ model User {
   vocabProgress VocabProgress[]
   startupPromos StartupPromo[]
 
+  deviceTokens DeviceToken[]
+
   callSecondsBalance   Int       @default(0)
   callSecondsUsedToday Int       @default(0)
   callSecondsDate      DateTime? @db.Date
@@ -526,4 +528,17 @@ model Report {
 
   @@index([reportedUserId, status])
   @@index([status, createdAt])
+}
+
+model DeviceToken {
+  id         String   @id @default(uuid())
+  token      String   @unique // e.g. "ExponentPushToken[xxxxxxxx]"
+  platform   String? // "ios" | "android"
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
 }
