@@ -90,8 +90,8 @@ export async function endRoom(roomId, { status } = {}) {
 
   if (finalStatus === 'ENDED' && durationSec > 0) {
     await Promise.all([
-      consumeCallSeconds(room.callerId, durationSec).catch(() => {}),
-      consumeCallSeconds(room.calleeId, durationSec).catch(() => {}),
+      consumeCallSeconds(room.callerId, durationSec, room.type).catch(() => {}),
+      consumeCallSeconds(room.calleeId, durationSec, room.type).catch(() => {}),
     ]);
   }
   return room;

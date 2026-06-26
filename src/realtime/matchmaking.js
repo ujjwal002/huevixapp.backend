@@ -28,13 +28,16 @@ export function registerMatchmaking(io, socket) {
     if (waiting.some((s) => s.id === socket.id)) return;
 
     const type = payload.type === 'AUDIO' ? 'AUDIO' : 'VIDEO';
+    // Remember this socket's requested type so we only pair like with like
+    // (audio↔audio, video↔video) and so each side is gated for the right type.
+    socket.data.callType = type;
 
-    // Credit gate: the requester must have call time left (free daily + prepaid).
-    // The waiting partner already passed this check when they queued (and can't
-    // be charged while waiting), so checking the requester here is sufficient.
+    // Credit gate: the requester must have time for THIS type. Audio can use the
+    // free daily allowance + prepaid; video requires prepaid balance only. The
+    // waiting partner already passed the same-type check when they queued.
     let access;
     try {
-      access = await getCallAccessById(socket.data.userId);
+      access = await getCallAccessById(socket.data.userId, type);
     } catch {
       access = { allowed: true };
     }
@@ -69,6 +72,7 @@ export function registerMatchmaking(io, socket) {
     for (let i = 0; i < waiting.length; i++) {
       const c = waiting[i];
       if (c.data.userId === socket.data.userId) continue;
+      if (c.data.callType !== type) continue; // pair audio↔audio, video↔video only
       if (blocked.has(c.data.userId)) continue;
       idx = i;
       break;

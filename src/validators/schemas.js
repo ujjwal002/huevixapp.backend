@@ -62,6 +62,14 @@ export const updateMeSchema = {
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
 };
 
+// Account deletion is destructive + irreversible, so we re-confirm the current
+// password even though the access token already authenticates the request.
+export const deleteMeSchema = {
+  body: z.object({
+    password: z.string().min(1, 'Password is required to delete your account'),
+  }),
+};
+
 export const feedQuerySchema = {
   query: z.object({
     level: levelEnum.optional(),

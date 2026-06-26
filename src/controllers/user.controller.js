@@ -1,6 +1,11 @@
 import { prisma } from '../db/prisma.js';
+import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
+import { verifyPassword } from '../utils/password.js';
 import { getEntitlementSummary } from '../services/entitlement.service.js';
+import { deleteObject } from '../services/storage.service.js';
+import { cancelRecurringSubscription } from '../services/payment.service.js';
 
 export const getMe = asyncHandler(async (req, res) => {
   const u = req.user;
@@ -69,4 +74,63 @@ export const getLeaderboard = asyncHandler(async (req, res) => {
       isMe: u.id === req.user.id,
     })),
   });
+});
+
+// Recordings store the raw storage KEY (e.g. "recordings/<uuid>.webm"), but
+// promo/card images store a full public URL. deleteObject() wants the key, so
+// turn a stored public URL back into its key. Returns null if it can't.
+function urlToStorageKey(value) {
+  if (!value) return null;
+  // Already a bare key (no scheme): use as-is.
+  if (!/^https?:\/\//i.test(value) && !value.startsWith('/')) return value;
+  const base = config.storage.publicBaseUrl;
+  if (base && value.startsWith(`${base}/`)) return value.slice(base.length + 1);
+  // Fallback: grab "<folder>/<file>" for a known storage folder.
+  const m = value.match(/(?:^|\/)(images|recordings|tts|misc)\/[^/?#]+/i);
+  return m ? m[0].replace(/^\//, '') : null;
+}
+
+// DELETE /users/me — permanently delete the account and all associated data.
+// Required by Google Play / Apple for any app with account creation. Removes:
+//   - the User row, which cascades to refresh tokens, completions, speaking
+//     attempts, saved cards, vocab progress, tutor sessions, device tokens,
+//     calls, blocks, reports, promos, and the subscription (schema relations
+//     are all onDelete: Cascade);
+//   - any future Razorpay autopay charges (cancelled first, best-effort);
+//   - the user's stored objects (speaking recordings, promo images), which a
+//     DB cascade does NOT touch.
+export const deleteMe = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+
+  // Re-authenticate. A stolen access token alone must not be able to wipe an
+  // account; the user has to prove the password too.
+  const ok = await verifyPassword(password, req.user.passwordHash);
+  if (!ok) throw ApiError.unauthorized('Password is incorrect', 'BAD_PASSWORD');
+
+  const userId = req.user.id;
+
+  // 1) Collect the user's stored files BEFORE the rows are gone (cascade
+  //    removes the rows but never the underlying objects in storage).
+  const [attempts, promos] = await Promise.all([
+    prisma.speakingAttempt.findMany({ where: { userId }, select: { audioUrl: true } }),
+    prisma.startupPromo.findMany({ where: { ownerId: userId }, select: { imageUrl: true } }),
+  ]);
+  const fileKeys = [
+    ...attempts.map((a) => a.audioUrl), // stored as a key
+    ...promos.map((p) => urlToStorageKey(p.imageUrl)), // stored as a public URL
+  ].filter(Boolean);
+
+  // 2) Stop future autopay charges on Razorpay (best-effort; we still delete
+  //    locally even if the provider call fails).
+  if (req.user.subscription?.providerRefId) {
+    await cancelRecurringSubscription(req.user.subscription.providerRefId).catch(() => {});
+  }
+
+  // 3) Delete the user. FK cascades remove every owned row atomically.
+  await prisma.user.delete({ where: { id: userId } });
+
+  // 4) Best-effort purge of the now-orphaned storage objects.
+  await Promise.allSettled(fileKeys.map((key) => deleteObject(key)));
+
+  res.json({ success: true, deleted: true });
 });

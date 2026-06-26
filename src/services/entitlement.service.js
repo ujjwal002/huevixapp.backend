@@ -242,18 +242,27 @@ export async function ensureDailyCallSeconds(user) {
 }
 
 function callSummaryFrom(user) {
-  const freeDaily = config.calls.freeDailySeconds;
+  const freeDaily = config.calls.freeDailySeconds; // AUDIO-only free allowance
   const usedToday = user.callSecondsUsedToday ?? 0;
   const balance = user.callSecondsBalance ?? 0;
   const freeLeft = Math.max(0, freeDaily - usedToday);
-  const totalLeft = freeLeft + balance;
+  const minStart = config.calls.minStartSeconds;
+
+  // Free minutes apply to AUDIO only. VIDEO always draws on the prepaid balance.
+  const audioLeft = freeLeft + balance; // audio can use free + prepaid
+  const videoLeft = balance; // video is prepaid only
+
   return {
     freeDailySeconds: freeDaily,
-    freeSecondsLeft: freeLeft,
-    balanceSeconds: balance,
-    totalSecondsLeft: totalLeft,
-    minStartSeconds: config.calls.minStartSeconds,
-    canStartCall: totalLeft >= config.calls.minStartSeconds,
+    freeSecondsLeft: freeLeft, // audio-only free time left today
+    balanceSeconds: balance, // prepaid; usable for audio OR video
+    audioSecondsLeft: audioLeft,
+    videoSecondsLeft: videoLeft,
+    totalSecondsLeft: audioLeft, // most permissive (audio) — kept for back-compat
+    minStartSeconds: minStart,
+    canStartAudio: audioLeft >= minStart,
+    canStartVideo: videoLeft >= minStart,
+    canStartCall: audioLeft >= minStart, // back-compat: can start *some* call
   };
 }
 
@@ -262,20 +271,25 @@ export async function getCallCreditSummary(user) {
   return callSummaryFrom(user);
 }
 
-export async function getCallAccess(user) {
+export async function getCallAccess(user, type = 'AUDIO') {
   await ensureDailyCallSeconds(user);
   const summary = callSummaryFrom(user);
-  if (summary.canStartCall) return { allowed: true, ...summary };
+  const ok = type === 'VIDEO' ? summary.canStartVideo : summary.canStartAudio;
+  if (ok) return { allowed: true, type, ...summary };
   return {
     allowed: false,
-    reason: 'NO_CALL_BALANCE',
-    message: 'You are out of call minutes. Recharge to keep practising.',
+    type,
+    reason: type === 'VIDEO' ? 'NO_VIDEO_BALANCE' : 'NO_CALL_BALANCE',
+    message:
+      type === 'VIDEO'
+        ? 'Video calls need call credits. Recharge to start a video call.'
+        : 'You are out of free minutes. Recharge to keep practising.',
     ...summary,
   };
 }
 
 // Realtime layer only knows the userId, so load the credit fields and check.
-export async function getCallAccessById(userId) {
+export async function getCallAccessById(userId, type = 'AUDIO') {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -286,13 +300,14 @@ export async function getCallAccessById(userId) {
     },
   });
   if (!user) return { allowed: false, reason: 'USER_NOT_FOUND', message: 'User not found' };
-  return getCallAccess(user);
+  return getCallAccess(user, type);
 }
 
-// After a call ends, spend the FREE daily allowance first, then the prepaid
-// balance. Best-effort post-call accounting (not a pre-call reserve), so a
-// single call can at most slightly overshoot before the next gate stops them.
-export async function consumeCallSeconds(userId, seconds) {
+// After a call ends, spend the FREE daily allowance first (AUDIO only), then the
+// prepaid balance. VIDEO calls skip the free bucket entirely and are billed from
+// the prepaid balance. Best-effort post-call accounting (not a pre-call reserve),
+// so a single call can at most slightly overshoot before the next gate stops them.
+export async function consumeCallSeconds(userId, seconds, type = 'AUDIO') {
   const secs = Math.max(0, Math.round(seconds || 0));
   if (secs === 0) return;
 
@@ -309,7 +324,9 @@ export async function consumeCallSeconds(userId, seconds) {
   await ensureDailyCallSeconds(user);
 
   const freeDaily = config.calls.freeDailySeconds;
-  const freeLeft = Math.max(0, freeDaily - (user.callSecondsUsedToday ?? 0));
+  // Free daily seconds are AUDIO-only; VIDEO is always paid from the balance.
+  const freeLeft =
+    type === 'VIDEO' ? 0 : Math.max(0, freeDaily - (user.callSecondsUsedToday ?? 0));
   const fromFree = Math.min(secs, freeLeft);
   const fromBalance = Math.min(secs - fromFree, user.callSecondsBalance ?? 0);
 
