@@ -5,3 +5,4 @@ storage/
 .DS_Store
 dist/
 coverage/
+play-service-account.json

@@ -13,6 +13,8 @@ import {
   cancelRecurringSubscription,
 } from '../services/payment.service.js';
 
+import * as gpurchase from '../controllers/googlePurchase.controller.js';
+
 // GET /subscription
 export const getSubscription = asyncHandler(async (req, res) => {
   const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });

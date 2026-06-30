@@ -5,6 +5,8 @@ import { config } from '../config/env.js';
 import { createPromoOrder, verifyPaymentSignature, refundPayment } from '../services/payment.service.js';
 import { notifyPromoLive } from '../services/notification.service.js';
 
+import * as gp from '../services/googlePlay.service.js';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 30;
 
@@ -228,4 +230,63 @@ export const deletePromo = asyncHandler(async (req, res) => {
 
   await prisma.startupPromo.delete({ where: { id: promo.id } });
   res.json({ ok: true });
+});
+
+const PROMO_DAYS = { promote_1day: 1, promote_3day: 3, promote_7day: 7, promote_14day: 14, promote_30day: 30 };
+
+// POST /promos/google — create a draft promo for Google Play (no Razorpay order).
+export const createPromoGoogle = asyncHandler(async (req, res) => {
+  const { startupName, title, body, ctaUrl, ctaText, imageUrl, days } = req.body;
+  const nDays = Math.min(Math.max(days || 1, 1), MAX_DAYS);
+  const productId = `promote_${nDays}day`;
+  if (!(productId in PROMO_DAYS)) throw ApiError.badRequest('Unsupported duration', 'BAD_DAYS');
+
+  const amountPaise = config.pricing.promoPerDayInr * nDays * 100;
+  const promo = await prisma.startupPromo.create({
+    data: {
+      ownerId: req.user.id,
+      startupName, title, body,
+      ctaUrl, ctaText: ctaText || 'Visit',
+      imageUrl: imageUrl || null,
+      days: nDays, amountPaise, status: 'PENDING_PAYMENT',
+    },
+  });
+
+  res.status(201).json({ promoId: promo.id, productId, days: nDays, amountInr: config.pricing.promoPerDayInr * nDays });
+});
+
+// POST /promos/:id/confirm-google — verify the Google Play purchase, send to review.
+export const confirmPromoGoogle = asyncHandler(async (req, res) => {
+  const { productId, purchaseToken } = req.body;
+  const promo = await prisma.startupPromo.findUnique({ where: { id: req.params.id } });
+  if (!promo || promo.ownerId !== req.user.id) throw ApiError.notFound('Promo not found');
+  if (promo.status !== 'PENDING_PAYMENT') return res.json({ id: promo.id, status: promo.status });
+
+  const days = PROMO_DAYS[productId];
+  if (!days) throw ApiError.badRequest('Unknown promote product', 'UNKNOWN_PRODUCT');
+  if (days !== promo.days) throw ApiError.badRequest('Product does not match promo duration', 'DURATION_MISMATCH');
+
+  const product = await gp.getProduct(productId, purchaseToken);
+  if (product.purchaseState !== gp.PRODUCT_PURCHASED) {
+    throw ApiError.badRequest('Purchase not completed', 'NOT_PURCHASED');
+  }
+
+  // A purchaseToken can fund exactly one promo (idempotent).
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.processedPurchase.create({
+        data: { purchaseToken, productId, userId: req.user.id, orderId: product.orderId || null },
+      });
+      await tx.startupPromo.update({ where: { id: promo.id }, data: { status: 'PENDING_REVIEW' } });
+    });
+  } catch (e) {
+    if (e?.code === 'P2002') {
+      const fresh = await prisma.startupPromo.findUnique({ where: { id: promo.id } });
+      return res.json({ id: promo.id, status: fresh?.status || 'PENDING_REVIEW', duplicate: true });
+    }
+    throw e;
+  }
+
+  await gp.consumeProduct(productId, purchaseToken); // consumable → can promote again later
+  res.json({ id: promo.id, status: 'PENDING_REVIEW' });
 });

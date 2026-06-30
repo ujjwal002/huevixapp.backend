@@ -133,6 +133,21 @@ export const config = {
     planMonthly: process.env.RAZORPAY_PLAN_MONTHLY,
   },
 
+  googlePlay: {
+    packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME || '',
+    // Full service-account JSON string OR a path to the key file — filled in later.
+    serviceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '',
+    subMonthlyId: process.env.GOOGLE_SUB_MONTHLY_ID || 'premium_monthly',
+    subYearlyId: process.env.GOOGLE_SUB_YEARLY_ID || 'premium_yearly',
+    rtdnSecret: process.env.GOOGLE_RTDN_SECRET || '',
+    // One-time consumable packs: productId -> SECONDS of call credit granted.
+    creditPacks: {
+      [process.env.GOOGLE_PACK_30MIN_ID || 'call_credits_30min']: 30 * 60,
+      [process.env.GOOGLE_PACK_60MIN_ID || 'call_credits_60min']: 60 * 60,
+      [process.env.GOOGLE_PACK_120MIN_ID || 'call_credits_120min']: 120 * 60,
+    },
+  },
+
   // Realtime practice calling: WebRTC ICE servers + signaling.
   // STUN is free and discovers public addresses; TURN relays media when a
   // direct peer-to-peer path fails (essential on mobile/cellular). coturn runs

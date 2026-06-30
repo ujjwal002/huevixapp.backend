@@ -7,6 +7,9 @@ import * as ads from '../controllers/ads.controller.js';
 import * as sub from '../controllers/subscription.controller.js';
 import * as notif from '../controllers/notification.controller.js';
 
+import * as gpurchase from '../controllers/googlePurchase.controller.js';
+
+
 
 
 const speakingRouter = Router();
@@ -32,6 +35,8 @@ subRouter.use(requireAuth);
 subRouter.get('/', sub.getSubscription);
 subRouter.post('/checkout', validate(checkoutSchema), sub.checkout);
 subRouter.post('/verify', validate(verifyPaymentSchema), sub.verify);
+
+subRouter.post('/google/verify', gpurchase.verifyGoogleSubscription);
 
 subRouter.post('/autopay', sub.startAutopay);
 subRouter.post('/autopay/verify', sub.verifyAutopay);

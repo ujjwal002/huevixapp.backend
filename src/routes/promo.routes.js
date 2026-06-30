@@ -7,6 +7,8 @@ import * as promo from '../controllers/promo.controller.js';
 import {  optionalAuth } from '../middleware/auth.js';
 import { metricsLimiter, promoCreateLimiter } from '../middleware/rateLimit.js';
 
+import {confirmPromoGoogleSchema} from '../validators/schemas.js';
+
 
 
 const router = Router();
@@ -26,5 +28,8 @@ router.post('/:id/click', optionalAuth, metricsLimiter, validate(promoIdParam), 
 
 router.post('/:id/pay', requireAuth, validate(promoIdParam), promo.resumePayment);
 router.delete('/:id', requireAuth, validate(promoIdParam), promo.deletePromo);
+
+router.post('/google', requireAuth, promoCreateLimiter, validate(createPromoSchema), promo.createPromoGoogle);
+router.post('/:id/confirm-google', requireAuth, validate(confirmPromoGoogleSchema), promo.confirmPromoGoogle);
 
 export default router;

@@ -280,3 +280,11 @@ export const promosMineQuerySchema = {
     limit: z.coerce.number().int().min(1).max(50).default(20),
   }),
 };
+
+export const confirmPromoGoogleSchema = {
+  params: z.object({ id: z.string().min(1) }),
+  body: z.object({
+    productId: z.string().min(1),
+    purchaseToken: z.string().min(1),
+  }),
+};

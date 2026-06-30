@@ -14,6 +14,9 @@ import vocabTutorRoutes from './vocabTutor.routes.js';
 
 import callsRoutes from './calls.routes.js';
 
+import * as gpurchase from '../controllers/googlePurchase.controller.js';
+import { requireAuth } from '../middleware/auth.js';
+
 import { prisma } from '../db/prisma.js';
 
 
@@ -85,5 +88,15 @@ router.use('/admin/settings', settingsRoutes);
 router.use('/vocab-tutor', vocabTutorRoutes);
 
 router.use('/calls', callsRoutes);
+
+
+// Google Play: one-time credit packs (authed)
+const purchasesRouter = Router();
+purchasesRouter.use(requireAuth);
+purchasesRouter.post('/google/verify', gpurchase.verifyGoogleProduct);
+router.use('/purchases', purchasesRouter);
+
+// Google Play: RTDN push endpoint (no auth — protected by the secret in the URL)
+router.post('/google/rtdn/:secret', gpurchase.googleRtdn);
 
 export default router;

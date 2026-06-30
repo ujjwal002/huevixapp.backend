@@ -542,3 +542,14 @@ model DeviceToken {
 
   @@index([userId])
 }
+
+
+model ProcessedPurchase {
+  purchaseToken String   @id
+  productId     String
+  userId        String
+  orderId       String?
+  grantedAt     DateTime @default(now())
+
+  @@index([userId])
+}

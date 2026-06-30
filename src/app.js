@@ -12,6 +12,10 @@ import { globalLimiter } from './middleware/rateLimit.js';
 import { requestId } from './middleware/requestId.js';
 import { STORAGE_ROOT } from './services/storage.service.js';
 
+import { servePrivacy } from './privacy.js';
+
+import { serveDeleteAccount } from './deleteAccount.js';
+
 const app = express();
 
 // Behind cloudflared/ngrok (see setup.md) the socket peer is the tunnel, not
@@ -94,6 +98,10 @@ app.use(
   express.static(STORAGE_ROOT)
 );
 
+
+
+app.get('/privacy', servePrivacy);
+app.get('/delete-account', serveDeleteAccount);
 app.use(config.apiPrefix, routes);
 
 app.use(notFoundHandler);
