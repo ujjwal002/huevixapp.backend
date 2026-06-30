@@ -50,6 +50,7 @@ app.use(
 if (config.env !== 'test') {
   if (config.env === 'production') {
     // Redact the RTDN secret (it lives in the URL path) so it never lands in logs.
+    morgan.token('id', (req) => req.id);
     morgan.token('safeurl', (req) =>
       req.originalUrl.replace(/(\/google\/rtdn\/)[^/?#]+/, '$1[REDACTED]')
     );
