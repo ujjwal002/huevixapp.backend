@@ -49,9 +49,12 @@ app.use(
 // production (skip the noisy /health probe).
 if (config.env !== 'test') {
   if (config.env === 'production') {
-    morgan.token('id', (req) => req.id);
+    // Redact the RTDN secret (it lives in the URL path) so it never lands in logs.
+    morgan.token('safeurl', (req) =>
+      req.originalUrl.replace(/(\/google\/rtdn\/)[^/?#]+/, '$1[REDACTED]')
+    );
     app.use(
-      morgan(':id :remote-addr :method :url :status :res[content-length] - :response-time ms', {
+      morgan(':id :remote-addr :method :safeurl :status :res[content-length] - :response-time ms', {
         skip: (req) => req.originalUrl === `${config.apiPrefix}/health`,
       })
     );
