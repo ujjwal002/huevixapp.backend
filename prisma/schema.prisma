@@ -78,15 +78,13 @@ model User {
   adCreditsRemaining           Int       @default(0) // earned via rewarded ads
   adCreditsGrantedDate         DateTime? @db.Date // for daily ad-credit reset
 
-  adCreditsGrantedToday        Int       @default(0) // credits GRANTED today; the real daily cap, never decremented on spend
-
+  adCreditsGrantedToday Int @default(0) // credits GRANTED today; the real daily cap, never decremented on spend
 
   paidSpeakingDate  DateTime? @db.Date
   paidSpeakingCount Int       @default(0)
 
-
   notificationsReadAt DateTime?
-  savedCards       SavedCard[]
+  savedCards          SavedCard[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -95,8 +93,17 @@ model User {
   refreshTokens    RefreshToken[]
   completions      CardCompletion[]
   speakingAttempts SpeakingAttempt[]
-  vocabProgress VocabProgress[]
-  startupPromos StartupPromo[]
+  vocabProgress    VocabProgress[]
+  startupPromos    StartupPromo[]
+
+  quizCurrentStreak  Int       @default(0)
+  quizLongestStreak  Int       @default(0)
+  quizLastPlayedDate DateTime?
+
+  quizPlays         QuizDailyPlay[]
+  quizAnswers       QuizAnswer[]
+  quizMonthlyScores QuizMonthlyScore[]
+  monthlyWins       MonthlyWinner[]
 
   deviceTokens DeviceToken[]
 
@@ -114,22 +121,17 @@ model User {
   reportsMade     Report[] @relation("ReportsMade")
   reportsReceived Report[] @relation("ReportsReceived")
 
-  
-
-  
-
   @@index([targetLanguage])
-
   @@index([longestStreak, currentStreak])
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  tokenHash String   @unique
+  tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -152,8 +154,8 @@ model Card {
   audioStatus    AudioStatus @default(PENDING)
   isPublished    Boolean     @default(false)
 
-  imageUrl       String? // hero image shown at the top of an article card (news feature)
-  sourceUrl      String? // original news article link (optional)
+  imageUrl  String? // hero image shown at the top of an article card (news feature)
+  sourceUrl String? // original news article link (optional)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -164,11 +166,10 @@ model Card {
   completions CardCompletion[]
   attempts    SpeakingAttempt[]
 
-  savedBy     SavedCard[]
+  savedBy SavedCard[]
 
   @@index([targetLanguage, level, isPublished])
 }
-
 
 model SavedCard {
   id        String   @id @default(uuid())
@@ -258,20 +259,19 @@ model SpeakingAttempt {
 // ---------------------------------------------------------------------------
 
 model Subscription {
-  id              String             @id @default(uuid())
-  userId          String             @unique
-  plan            SubscriptionPlan
-  status          SubscriptionStatus @default(PENDING)
-  provider        String             @default("razorpay")
-  providerOrderId String?
-  providerRefId   String? // payment id / subscription id
+  id               String             @id @default(uuid())
+  userId           String             @unique
+  plan             SubscriptionPlan
+  status           SubscriptionStatus @default(PENDING)
+  provider         String             @default("razorpay")
+  providerOrderId  String?
+  providerRefId    String? // payment id / subscription id
   currentPeriodEnd DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
-
 
 model VocabWord {
   id           String          @id @default(cuid())
@@ -285,8 +285,7 @@ model VocabWord {
   createdAt    DateTime        @default(now())
   progress     VocabProgress[]
 
-  audioUrl     String? // cached English TTS (word + example), generated once, reused for all users
-
+  audioUrl String? // cached English TTS (word + example), generated once, reused for all users
 
   @@index([ladder])
 }
@@ -328,7 +327,6 @@ model VocabTutorSession {
   @@index([userId, createdAt])
 }
 
-
 model GrammarLesson {
   id          String   @id @default(cuid())
   level       String
@@ -343,7 +341,6 @@ model GrammarLesson {
   @@index([order])
 }
 
-
 model SponsoredCard {
   id         String   @id @default(cuid())
   advertiser String
@@ -356,22 +353,20 @@ model SponsoredCard {
   createdAt  DateTime @default(now())
 }
 
-
 model ProcessedWebhookEvent {
   id        String   @id // provider event id (e.g. Razorpay x-razorpay-event-id)
   eventType String
   createdAt DateTime @default(now())
 }
 
-
 // ----------------------------- Startup promos (paid user ads) -----------------
 
 enum PromoStatus {
   PENDING_PAYMENT // created; awaiting upfront payment
-  PENDING_REVIEW  // paid; awaiting admin approval
-  ACTIVE          // approved & live (until expiresAt)
-  REJECTED        // admin rejected; payment refunded
-  EXPIRED         // ran its full duration
+  PENDING_REVIEW // paid; awaiting admin approval
+  ACTIVE // approved & live (until expiresAt)
+  REJECTED // admin rejected; payment refunded
+  EXPIRED // ran its full duration
 }
 
 // A user-created, PAID promotion ("promote your startup"). Distinct from the
@@ -427,7 +422,6 @@ model PromoImpression {
   @@index([promoId])
 }
 
-
 // App-wide settings (single row, id = "singleton"). Master ad switch + feed
 // ad cadence, flippable live from the admin without a redeploy.
 model AppSettings {
@@ -437,7 +431,6 @@ model AppSettings {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
-
 
 // ---------------------------------------------------------------------------
 // Practice calling — 1:1 audio/video "Find People" sessions
@@ -450,9 +443,9 @@ enum CallType {
 
 enum CallStatus {
   CONNECTING // matched; WebRTC handshake in progress
-  ACTIVE     // media negotiated; the two are actually talking
-  ENDED      // finished normally (either side hung up / disconnected after ACTIVE)
-  MISSED     // matched but never connected (handshake failed / left immediately)
+  ACTIVE // media negotiated; the two are actually talking
+  ENDED // finished normally (either side hung up / disconnected after ACTIVE)
+  MISSED // matched but never connected (handshake failed / left immediately)
 }
 
 // One row per matched practice call. caller = the side that sent the first
@@ -475,7 +468,6 @@ model Call {
   @@index([callerId, startedAt])
   @@index([calleeId, startedAt])
 }
-
 
 // ---------------------------------------------------------------------------
 // Safety — blocking + reporting for practice calls
@@ -543,7 +535,6 @@ model DeviceToken {
   @@index([userId])
 }
 
-
 model ProcessedPurchase {
   purchaseToken String   @id
   productId     String
@@ -552,4 +543,103 @@ model ProcessedPurchase {
   grantedAt     DateTime @default(now())
 
   @@index([userId])
+}
+
+model DailyQuiz {
+  id             String   @id @default(uuid())
+  date           DateTime
+  targetLanguage String   @default("en")
+  status         String   @default("READY")
+  createdAt      DateTime @default(now())
+
+  questions QuizQuestion[]
+  plays     QuizDailyPlay[]
+
+  @@unique([date, targetLanguage])
+  @@index([date])
+}
+
+model QuizQuestion {
+  id           String  @id @default(uuid())
+  quizId       String
+  order        Int
+  prompt       String
+  options      Json
+  correctIndex Int
+  explanation  String?
+  voided       Boolean @default(false)
+
+  quiz    DailyQuiz    @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers QuizAnswer[]
+
+  @@unique([quizId, order])
+  @@index([quizId])
+}
+
+model QuizDailyPlay {
+  id            String    @id @default(uuid())
+  userId        String
+  quizId        String
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  answeredCount Int       @default(0)
+  correctCount  Int       @default(0)
+  pointsEarned  Int       @default(0)
+
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quiz DailyQuiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, quizId])
+  @@index([userId])
+}
+
+model QuizAnswer {
+  id            String   @id @default(uuid())
+  userId        String
+  questionId    String
+  chosenIndex   Int
+  isCorrect     Boolean
+  pointsAwarded Int      @default(0)
+  answeredAt    DateTime @default(now())
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionId])
+  @@index([userId, answeredAt])
+}
+
+model QuizMonthlyScore {
+  id               String   @id @default(uuid())
+  userId           String
+  period           String
+  totalPoints      Int      @default(0)
+  correctCount     Int      @default(0)
+  lastEarnedAt     DateTime @default(now())
+  flaggedForReview Boolean  @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, period])
+  @@index([period, totalPoints])
+}
+
+model MonthlyWinner {
+  id          String @id @default(uuid())
+  period      String @unique
+  userId      String
+  totalPoints Int
+  status      String @default("PENDING_REVIEW")
+
+  contactPhone  String?
+  preferredRole String?
+  note          String?
+
+  flaggedForReview Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  acceptedAt       DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
 }

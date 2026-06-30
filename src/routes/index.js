@@ -25,6 +25,8 @@ import { prisma } from '../db/prisma.js';
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
 import { getAppSettings } from '../services/settings.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+
+import quizRoutes from './quiz.routes.js';
 import {
   SUPPORTED_LANGUAGES,
   SUPPORTED_NATIVE_LANGUAGES,
@@ -88,6 +90,8 @@ router.use('/admin/settings', settingsRoutes);
 router.use('/vocab-tutor', vocabTutorRoutes);
 
 router.use('/calls', callsRoutes);
+
+router.use('/quiz', quizRoutes);
 
 
 // Google Play: one-time credit packs (authed)
