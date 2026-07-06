@@ -19,6 +19,9 @@ import { requireAuth } from '../middleware/auth.js';
 
 import { prisma } from '../db/prisma.js';
 
+import { admobSsv } from '../controllers/admobSsv.controller.js';
+
+
 
 
 
@@ -92,6 +95,8 @@ router.use('/vocab-tutor', vocabTutorRoutes);
 router.use('/calls', callsRoutes);
 
 router.use('/quiz', quizRoutes);
+
+router.get('/ads/admob-ssv', admobSsv);
 
 
 // Google Play: one-time credit packs (authed)

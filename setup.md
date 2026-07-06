@@ -28,3 +28,6 @@ curl -X POST http://localhost:4000/api/v1/cards/admin-article \
   -F "topic=travel" \
   -F "publish=true" \
   -F 'vocab=[{"term":"serene","partOfSpeech":"adjective","meaning":"शांत","example":"The temple garden was serene."}]'
+
+
+  (crontab -l 2>/dev/null; echo "30 3 * * * cd /home/ubuntu/huevixapp.backend && node scripts/quiz-daily.js >> /home/ubuntu/quiz-cron.log 2>&1") | crontab -~/backups/backup.sh
