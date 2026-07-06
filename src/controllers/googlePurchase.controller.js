@@ -3,27 +3,31 @@ import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
-import { addCallSeconds } from '../services/entitlement.service.js';
 import * as gp from '../services/googlePlay.service.js';
 
 // =============================================================================
-// Google Play purchase verification endpoints (sit alongside the Razorpay flow
-// in subscription.controller.js). Three handlers:
+// Google Play purchase verification — the ONLY payment path since the Razorpay
+// migration. Three handlers:
 //
 //   verifyGoogleSubscription  POST /subscription/google/verify     (auth)
 //   verifyGoogleProduct       POST /purchases/google/verify        (auth)
 //   googleRtdn                POST /google/rtdn/:secret            (no auth, secret)
 //
-// Design choices that match your existing code:
-//   * The client sends only { productId, purchaseToken }; we verify server-side.
-//   * Subscriptions reuse your Subscription model (provider='google_play',
-//     providerRefId = purchaseToken). isSubscriptionActive() already gates
-//     access on status==='ACTIVE' && currentPeriodEnd > now, so nothing in
-//     entitlement.service.js needs to change.
-//   * One-time packs reuse addCallSeconds() to credit the prepaid balance.
-//   * Idempotency: one-time grants are guarded by the ProcessedPurchase table
-//     (unique purchaseToken); RTDN messages by ProcessedWebhookEvent (same
-//     table the Razorpay webhook uses), keyed by the Pub/Sub messageId.
+// Anti-abuse model:
+//   * The client sends only { productId, purchaseToken }; entitlement is
+//     decided exclusively from Google's answer, never the client's claim.
+//   * TOKEN CLAIMING: a purchaseToken can activate exactly ONE account. The
+//     unique index on Subscription.providerRefId is the DB backstop; the
+//     explicit ownership check below gives a clean error instead of a P2002.
+//   * PRODUCT ASSERTION: the client's productId must match the lineItems in
+//     Google's response, so a monthly buyer can't record a YEARLY plan.
+//   * ACCOUNT BINDING: if the app sets obfuscatedExternalAccountId = userId at
+//     purchase time (recommended!), we verify it matches the caller, and RTDN
+//     can grant purchases even when the client never reached /verify.
+//   * Idempotency: one-time grants via ProcessedPurchase (unique token); RTDN
+//     via ProcessedWebhookEvent keyed by the Pub/Sub messageId, with the
+//     marker + effects committed in ONE transaction (crash-safe, like the old
+//     Razorpay webhook).
 // =============================================================================
 
 function planForProduct(productId) {
@@ -32,11 +36,56 @@ function planForProduct(productId) {
   return null;
 }
 
+// The productId(s) Google says this token is for. subscriptionsv2 puts them on
+// lineItems; there is normally exactly one.
+function productIdsOf(sub) {
+  return (sub.lineItems || []).map((li) => li.productId).filter(Boolean);
+}
+
+// The userId the app embedded at purchase time (if it did). Two shapes exist in
+// the wild depending on API version, so check both.
+function boundUserIdOf(sub) {
+  return (
+    sub.externalAccountIdentifiers?.obfuscatedExternalAccountId ||
+    sub.obfuscatedExternalAccountId ||
+    null
+  );
+}
+
+// Local subscription state for a Google subscriptionsv2 resource.
+//   ACTIVE / IN_GRACE_PERIOD -> ACTIVE   (paid & entitled)
+//   CANCELED                 -> CANCELED (auto-renew OFF but still INSIDE the
+//                                        paid period: entitled until expiry —
+//                                        do NOT revoke access here)
+//   everything else          -> EXPIRED  (on hold, paused, expired, revoked)
+function localStateFor(sub) {
+  const state = sub.subscriptionState;
+  if (gp.isSubActiveState(state)) return 'ACTIVE';
+  if (state === 'SUBSCRIPTION_STATE_CANCELED') return 'CANCELED';
+  return 'EXPIRED';
+}
+
+// Apply Google's authoritative subscription state to a local row (tx-aware).
+async function applyGoogleState(tx, localId, sub) {
+  const status = localStateFor(sub);
+  const end = gp.subscriptionExpiry(sub);
+  await tx.subscription.update({
+    where: { id: localId },
+    data:
+      status === 'EXPIRED'
+        ? { status, currentPeriodEnd: null }
+        : { status, ...(end ? { currentPeriodEnd: end } : {}) },
+  });
+}
+
 // ---- POST /subscription/google/verify --------------------------------------
 // Client calls this right after expo-iap reports a successful subscription
 // purchase. We confirm with Google, then activate the local subscription.
 export const verifyGoogleSubscription = asyncHandler(async (req, res) => {
-  const { productId, purchaseToken } = req.body;
+  const { productId, purchaseToken } = req.body || {};
+  if (!purchaseToken || typeof purchaseToken !== 'string') {
+    throw ApiError.badRequest('purchaseToken is required', 'MISSING_TOKEN');
+  }
   const plan = planForProduct(productId);
   if (!plan) throw ApiError.badRequest('Unknown subscription product', 'UNKNOWN_PRODUCT');
 
@@ -48,24 +97,61 @@ export const verifyGoogleSubscription = asyncHandler(async (req, res) => {
   const currentPeriodEnd = gp.subscriptionExpiry(sub);
   if (!currentPeriodEnd) throw ApiError.badRequest('Subscription has no expiry', 'NO_EXPIRY');
 
-  const updated = await prisma.subscription.upsert({
-    where: { userId: req.user.id },
-    create: {
-      userId: req.user.id,
-      plan,
-      status: 'ACTIVE',
-      provider: 'google_play',
-      providerRefId: purchaseToken, // long-lived; RTDN re-queries with this
-      currentPeriodEnd,
-    },
-    update: {
-      plan,
-      status: 'ACTIVE',
-      provider: 'google_play',
-      providerRefId: purchaseToken,
-      currentPeriodEnd,
-    },
+  // PRODUCT ASSERTION: the plan we store must come from what Google says was
+  // bought, not from the client's claim. (Mock mode fabricates the monthly SKU,
+  // so this also passes locally.)
+  const googleProducts = productIdsOf(sub);
+  if (googleProducts.length && !googleProducts.includes(productId)) {
+    throw ApiError.badRequest('Product does not match the purchase token', 'PRODUCT_MISMATCH');
+  }
+
+  // ACCOUNT BINDING: if the purchase carries an embedded userId, it must be the
+  // caller. Set obfuscatedExternalAccountId = user.id in the app's billing flow
+  // to turn this on; purchases without it still pass (backwards compatible).
+  const boundUserId = boundUserIdOf(sub);
+  if (boundUserId && boundUserId !== req.user.id) {
+    throw ApiError.forbidden('This purchase belongs to a different account', 'TOKEN_NOT_YOURS');
+  }
+
+  // TOKEN CLAIMING: reject a token already attached to someone else's
+  // subscription. The unique index on providerRefId closes the race two
+  // concurrent claims could otherwise win together.
+  const claimedBy = await prisma.subscription.findFirst({
+    where: { providerRefId: purchaseToken, userId: { not: req.user.id } },
+    select: { id: true },
   });
+  if (claimedBy) {
+    throw ApiError.forbidden('This purchase is already linked to another account', 'TOKEN_ALREADY_USED');
+  }
+
+  let updated;
+  try {
+    updated = await prisma.subscription.upsert({
+      where: { userId: req.user.id },
+      create: {
+        userId: req.user.id,
+        plan,
+        status: 'ACTIVE',
+        provider: 'google_play',
+        providerRefId: purchaseToken, // long-lived; RTDN re-queries with this
+        currentPeriodEnd,
+      },
+      update: {
+        plan,
+        status: 'ACTIVE',
+        provider: 'google_play',
+        providerRefId: purchaseToken,
+        currentPeriodEnd,
+      },
+    });
+  } catch (e) {
+    // Lost the claim race: someone else's row grabbed this token between our
+    // check and the upsert. Same outcome as the explicit check above.
+    if (e?.code === 'P2002') {
+      throw ApiError.forbidden('This purchase is already linked to another account', 'TOKEN_ALREADY_USED');
+    }
+    throw e;
+  }
 
   // Acknowledge within 3 days or Google auto-refunds. Safe to call even if the
   // client's finishTransaction already acknowledged.
@@ -79,7 +165,10 @@ export const verifyGoogleSubscription = asyncHandler(async (req, res) => {
 // ---- POST /purchases/google/verify -----------------------------------------
 // One-time CONSUMABLE credit packs (maps productId -> seconds of call credit).
 export const verifyGoogleProduct = asyncHandler(async (req, res) => {
-  const { productId, purchaseToken } = req.body;
+  const { productId, purchaseToken } = req.body || {};
+  if (!purchaseToken || typeof purchaseToken !== 'string') {
+    throw ApiError.badRequest('purchaseToken is required', 'MISSING_TOKEN');
+  }
   const seconds = config.googlePlay.creditPacks[productId];
   if (!seconds) throw ApiError.badRequest('Unknown product', 'UNKNOWN_PRODUCT');
 
@@ -127,13 +216,19 @@ export const verifyGoogleProduct = asyncHandler(async (req, res) => {
 });
 
 // ---- POST /google/rtdn/:secret ---------------------------------------------
-// Real-time Developer Notifications, delivered by Cloud Pub/Sub push. This is
-// the Google equivalent of your Razorpay webhook: the source of truth for
-// renewals, cancellations, expiries and refunds. We re-query Google for the
-// authoritative state rather than trusting the notification body.
+// Real-time Developer Notifications, delivered by Cloud Pub/Sub push — the
+// source of truth for renewals, cancellations, expiries and refunds. We
+// re-query Google for the authoritative state rather than trusting the
+// notification body.
 //
 // Auth: the secret in the URL must match GOOGLE_RTDN_SECRET. (For stronger
-// security you can additionally verify the Pub/Sub OIDC token — see the guide.)
+// security, additionally verify the Pub/Sub OIDC token.)
+//
+// Idempotency + crash-safety: the dedupe marker and all DB effects commit in
+// ONE transaction. A crash mid-processing rolls back the marker too, so
+// Pub/Sub's retry reprocesses cleanly; a duplicate delivery hits the unique
+// constraint and is acked without side effects. (The Google re-query happens
+// BEFORE the transaction so we never hold a DB tx open across a network call.)
 export const googleRtdn = asyncHandler(async (req, res) => {
   const expected = config.googlePlay.rtdnSecret || '';
   const got = req.params.secret || '';
@@ -156,87 +251,128 @@ export const googleRtdn = asyncHandler(async (req, res) => {
     return res.status(204).end(); // malformed; ack so Pub/Sub stops retrying
   }
 
-  // Idempotency: reuse ProcessedWebhookEvent, namespaced so it can't collide
-  // with Razorpay event ids. A duplicate push (Pub/Sub guarantees at-least-once)
-  // hits the unique constraint and is acked without reprocessing.
   const dedupeId = `gp_${message.messageId}`;
-  try {
-    await prisma.processedWebhookEvent.create({
-      data: { id: dedupeId, eventType: 'google_rtdn' },
+
+  // Fast path: already handled (cheap read; the unique constraint inside the
+  // transaction below remains the authoritative guard).
+  const seen = await prisma.processedWebhookEvent.findUnique({ where: { id: dedupeId } });
+  if (seen) return res.status(204).end();
+
+  // ---- Pre-fetch authoritative state OUTSIDE the transaction ----------------
+  let work = null; // () => tx-effects, decided below
+
+  if (note.subscriptionNotification?.purchaseToken) {
+    const purchaseToken = note.subscriptionNotification.purchaseToken;
+    let sub;
+    try {
+      sub = await gp.getSubscription(purchaseToken);
+    } catch (err) {
+      // Couldn't reach Google: 5xx so Pub/Sub retries later (marker not written).
+      console.error('[rtdn] google re-query failed:', err.message);
+      return res.status(502).json({ error: 'GP_QUERY_FAILED' });
+    }
+
+    const local = await prisma.subscription.findFirst({
+      where: { providerRefId: purchaseToken },
+      select: { id: true },
     });
-  } catch (e) {
-    if (e?.code === 'P2002') return res.status(204).end();
-    throw e;
+
+    if (local) {
+      work = (tx) => applyGoogleState(tx, local.id, sub);
+    } else {
+      // Unknown token: the client died before calling /verify. If the purchase
+      // is bound to a user (obfuscatedExternalAccountId), grant it here so a
+      // paid user is never left without access. Unbound + unknown -> ignore
+      // (we have no safe way to pick an account).
+      const boundUserId = boundUserIdOf(sub);
+      const googleProducts = productIdsOf(sub);
+      const plan = planForProduct(googleProducts[0]);
+      const end = gp.subscriptionExpiry(sub);
+      const entitled = localStateFor(sub) !== 'EXPIRED';
+      if (boundUserId && plan && end && entitled) {
+        const userExists = await prisma.user.findUnique({
+          where: { id: boundUserId },
+          select: { id: true },
+        });
+        if (userExists) {
+          work = (tx) =>
+            tx.subscription.upsert({
+              where: { userId: boundUserId },
+              create: {
+                userId: boundUserId,
+                plan,
+                status: localStateFor(sub),
+                provider: 'google_play',
+                providerRefId: purchaseToken,
+                currentPeriodEnd: end,
+              },
+              update: {
+                plan,
+                status: localStateFor(sub),
+                provider: 'google_play',
+                providerRefId: purchaseToken,
+                currentPeriodEnd: end,
+              },
+            });
+        }
+      }
+      if (!work) {
+        console.warn('[rtdn] unknown purchase token (no bound user) — recording as seen');
+      }
+    }
+  } else if (note.voidedPurchaseNotification?.purchaseToken) {
+    const { purchaseToken } = note.voidedPurchaseNotification;
+    work = (tx) => handleVoidedPurchase(tx, purchaseToken);
   }
+  // oneTimeProductNotification: nothing to do — the credit is granted at
+  // /purchases/google/verify time and refunds arrive as voidedPurchase events.
 
   try {
-    if (note.subscriptionNotification) {
-      await handleSubscriptionNotification(note.subscriptionNotification);
-    } else if (note.voidedPurchaseNotification) {
-      await handleVoidedPurchase(note.voidedPurchaseNotification);
-    }
-    // oneTimeProductNotification: nothing to do here — the credit is granted at
-    // /purchases/google/verify time and refunds arrive as voidedPurchase events.
+    await prisma.$transaction(async (tx) => {
+      await tx.processedWebhookEvent.create({ data: { id: dedupeId, eventType: 'google_rtdn' } });
+      if (work) await work(tx);
+    });
   } catch (err) {
-    // Roll back the dedupe marker so Pub/Sub retries a genuinely failed event.
-    await prisma.processedWebhookEvent.delete({ where: { id: dedupeId } }).catch(() => {});
+    if (err?.code === 'P2002') return res.status(204).end(); // duplicate delivery
     console.error('[rtdn] handler error:', err.message);
-    return res.status(500).json({ error: 'RTDN_PROCESSING_FAILED' });
+    return res.status(500).json({ error: 'RTDN_PROCESSING_FAILED' }); // tx rolled back; retry
   }
 
   return res.status(204).end();
 });
 
-async function handleSubscriptionNotification({ purchaseToken }) {
-  if (!purchaseToken) return;
-  const sub = await gp.getSubscription(purchaseToken); // authoritative re-fetch
-
-  const local = await prisma.subscription.findFirst({ where: { providerRefId: purchaseToken } });
-  if (!local) return; // we don't know this token (e.g. verify never ran) — ignore
-
-  if (gp.isSubActiveState(sub.subscriptionState)) {
-    const end = gp.subscriptionExpiry(sub);
-    await prisma.subscription.update({
-      where: { id: local.id },
-      data: { status: 'ACTIVE', currentPeriodEnd: end },
-    });
-  } else {
-    // CANCELED / EXPIRED / ON_HOLD / PAUSED / REVOKED → no access.
-    await prisma.subscription.update({
-      where: { id: local.id },
-      data: { status: 'EXPIRED' },
-    });
-  }
-}
-
-async function handleVoidedPurchase({ purchaseToken }) {
+async function handleVoidedPurchase(tx, purchaseToken) {
   if (!purchaseToken) return;
 
   // A voided purchase can be either a subscription or a one-time pack; we look
   // it up in both places rather than branching on the notification's type.
-  const local = await prisma.subscription.findFirst({ where: { providerRefId: purchaseToken } });
+  const local = await tx.subscription.findFirst({ where: { providerRefId: purchaseToken } });
   if (local) {
-    await prisma.subscription.update({
+    // Refund/chargeback -> revoke access immediately.
+    await tx.subscription.update({
       where: { id: local.id },
-      data: { status: 'CANCELED', currentPeriodEnd: null },
+      data: { status: 'EXPIRED', currentPeriodEnd: null },
     });
     return;
   }
 
-  // One-time pack refund/chargeback: claw back the granted credit (floored at 0).
-  const processed = await prisma.processedPurchase.findUnique({ where: { purchaseToken } });
+  // One-time pack refund/chargeback: claw back the granted credit, floored at
+  // zero — as a pair of CONDITIONAL updates so a concurrent spend can't
+  // interleave between a read and a write.
+  const processed = await tx.processedPurchase.findUnique({ where: { purchaseToken } });
   if (processed) {
     const seconds = config.googlePlay.creditPacks[processed.productId] || 0;
     if (seconds > 0) {
-      const u = await prisma.user.findUnique({
-        where: { id: processed.userId },
-        select: { callSecondsBalance: true },
+      const r = await tx.user.updateMany({
+        where: { id: processed.userId, callSecondsBalance: { gte: seconds } },
+        data: { callSecondsBalance: { decrement: seconds } },
       });
-      const newBalance = Math.max(0, (u?.callSecondsBalance ?? 0) - seconds);
-      await prisma.user.update({
-        where: { id: processed.userId },
-        data: { callSecondsBalance: newBalance },
-      });
+      if (r.count === 0) {
+        await tx.user.updateMany({
+          where: { id: processed.userId },
+          data: { callSecondsBalance: 0 },
+        });
+      }
     }
   }
 }

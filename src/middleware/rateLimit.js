@@ -44,3 +44,12 @@ export const promoCreateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+// Endpoints that SEND email (verification / reset OTPs). Tight cap: each hit
+// costs an outbound mail and could be used to bombard a victim's inbox.
+export const emailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: { message: 'Too many email requests, try again later', code: 'RATE_LIMITED' } },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

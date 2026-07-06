@@ -39,7 +39,7 @@ export function planPeriodEnd(plan, from = new Date()) {
 export async function createOrder({ plan, userId }) {
   const amountPaise = planAmountInr(plan) * 100; // Razorpay uses paise
 
-  if (config.mockExternal || !config.razorpay.keyId) {
+  if (config.mockExternal) {
     return {
       orderId: `order_mock_${crypto.randomBytes(8).toString('hex')}`,
       amount: amountPaise,
@@ -47,6 +47,11 @@ export async function createOrder({ plan, userId }) {
       keyId: 'rzp_test_mock',
       _mock: true,
     };
+  }
+  // Real mode but Razorpay not configured: refuse instead of fabricating a mock
+  // order (which, combined with a fail-open verify, minted free subscriptions).
+  if (!config.razorpay.keyId) {
+    throw new ApiError(501, 'Razorpay is not configured on this server', 'RAZORPAY_DISABLED');
   }
 
   const { default: Razorpay } = await import('razorpay');
@@ -70,9 +75,11 @@ export async function createOrder({ plan, userId }) {
 
 // Verifies the checkout signature returned by Razorpay Checkout on the client.
 export function verifyPaymentSignature({ orderId, paymentId, signature }) {
-  if (config.mockExternal || !config.razorpay.keySecret) {
-    return true; // accept in mock mode
-  }
+  if (config.mockExternal) return true; // accept in mock mode only
+  // FAIL CLOSED: real mode with no secret means we CANNOT verify — reject.
+  // (Previously returned true, which made /subscription/verify a free-premium
+  // endpoint on any deployment that didn't set Razorpay keys.)
+  if (!config.razorpay.keySecret) return false;
   const expected = crypto
     .createHmac('sha256', config.razorpay.keySecret)
     .update(`${orderId}|${paymentId}`)
@@ -82,7 +89,8 @@ export function verifyPaymentSignature({ orderId, paymentId, signature }) {
 
 // Verifies a Razorpay webhook payload signature.
 export function verifyWebhookSignature(rawBody, signature) {
-  if (config.mockExternal || !config.razorpay.webhookSecret) return true;
+  if (config.mockExternal) return true;
+  if (!config.razorpay.webhookSecret) return false; // fail closed, never fail open
   const expected = crypto
     .createHmac('sha256', config.razorpay.webhookSecret)
     .update(rawBody)
@@ -91,8 +99,11 @@ export function verifyWebhookSignature(rawBody, signature) {
 }
 
 export async function createRecurringSubscription({ planId, userId, totalCount = 120 }) {
-  if (config.mockExternal || !config.razorpay.keyId) {
+  if (config.mockExternal) {
     return { subscriptionId: `sub_mock_${Date.now()}`, keyId: 'rzp_test_mock', _mock: true };
+  }
+  if (!config.razorpay.keyId) {
+    throw new ApiError(501, 'Razorpay is not configured on this server', 'RAZORPAY_DISABLED');
   }
   const { default: Razorpay } = await import('razorpay');
   const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });
@@ -112,7 +123,8 @@ export async function createRecurringSubscription({ planId, userId, totalCount =
 
 // Subscription signatures hash payment_id|subscription_id (different order from orders!)
 export function verifySubscriptionSignature({ subscriptionId, paymentId, signature }) {
-  if (config.mockExternal || !config.razorpay.keySecret) return true;
+  if (config.mockExternal) return true;
+  if (!config.razorpay.keySecret) return false; // fail closed
   const expected = crypto
     .createHmac('sha256', config.razorpay.keySecret)
     .update(`${paymentId}|${subscriptionId}`)
@@ -138,7 +150,7 @@ export async function cancelRecurringSubscription(subscriptionId) {
 // One-time order for an arbitrary amount (used by paid startup promos). Unlike
 // createOrder (which prices a subscription plan), this takes the amount directly.
 export async function createPromoOrder({ amountPaise, userId, promoId }) {
-  if (config.mockExternal || !config.razorpay.keyId) {
+  if (config.mockExternal) {
     return {
       orderId: `order_mock_${crypto.randomBytes(8).toString('hex')}`,
       amount: amountPaise,
@@ -146,6 +158,9 @@ export async function createPromoOrder({ amountPaise, userId, promoId }) {
       keyId: 'rzp_test_mock',
       _mock: true,
     };
+  }
+  if (!config.razorpay.keyId) {
+    throw new ApiError(501, 'Razorpay is not configured on this server', 'RAZORPAY_DISABLED');
   }
   const { default: Razorpay } = await import('razorpay');
   const instance = new Razorpay({ key_id: config.razorpay.keyId, key_secret: config.razorpay.keySecret });

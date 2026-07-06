@@ -4,6 +4,7 @@ import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 import { addPresence, removePresence, onlineCount } from './presence.js';
 import { registerMatchmaking, leaveQueue } from './matchmaking.js';
+import { registerTutorCalls, cleanupTutorInvites } from './tutorCalls.js';
 import { registerSignaling } from './signaling.js';
 import { handleDisconnect } from './rooms.js';
 
@@ -72,6 +73,7 @@ export function initRealtime(httpServer) {
 
     registerMatchmaking(io, socket);
     registerSignaling(io, socket);
+    registerTutorCalls(io, socket);
 
     // Lobby helper: how many people are currently online (rough availability).
     socket.on('online_count', () => socket.emit('online_count', { count: onlineCount() }));
@@ -80,6 +82,7 @@ export function initRealtime(httpServer) {
       console.log(`[rt] DISCONNECT user=${socket.data.userId} (${socket.data.name})`);
       leaveQueue(socket);
       removePresence(socket.data.userId, socket.id);
+      cleanupTutorInvites(io, socket); // after removePresence so "last device" is accurate
       await handleDisconnect(io, socket);
     });
   });

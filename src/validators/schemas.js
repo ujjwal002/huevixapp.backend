@@ -52,6 +52,77 @@ export const refreshSchema = {
   body: z.object({ refreshToken: z.string().min(10) }),
 };
 
+export const googleLoginSchema = {
+  body: z.object({ idToken: z.string().min(10).max(4096) }),
+};
+
+const otpCode = z.string().regex(/^\d{6}$/, 'Code must be 6 digits');
+
+export const verifyEmailSchema = {
+  body: z.object({ code: otpCode }),
+};
+
+export const forgotPasswordSchema = {
+  body: z.object({ email: emailField }),
+};
+
+export const resetPasswordSchema = {
+  body: z.object({
+    email: emailField,
+    code: otpCode,
+    newPassword: z.string().min(8).max(128),
+  }),
+};
+
+// ---- Tutor marketplace ------------------------------------------------------
+
+export const tutorApplySchema = {
+  body: z.object({
+    bio: z.string().min(20).max(1000),
+    languages: z.string().min(2).max(60).default('en'), // comma-separated codes
+    experience: z.string().max(1000).optional(),
+    upiId: z
+      .string()
+      .min(3)
+      .max(80)
+      .regex(/^[\w.-]{2,}@[a-zA-Z]{2,}$/, 'Enter a valid UPI id like name@bank'),
+  }),
+};
+
+export const tutorUpdateSchema = {
+  body: z
+    .object({
+      bio: z.string().min(20).max(1000).optional(),
+      languages: z.string().min(2).max(60).optional(),
+      experience: z.string().max(1000).optional(),
+      upiId: z
+        .string()
+        .min(3)
+        .max(80)
+        .regex(/^[\w.-]{2,}@[a-zA-Z]{2,}$/, 'Enter a valid UPI id like name@bank')
+        .optional(),
+      isOnline: z.boolean().optional(),
+    })
+    .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
+};
+
+export const tutorRejectSchema = {
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({ reason: z.string().max(500).optional() }),
+};
+
+export const tutorIdParam = {
+  params: z.object({ id: z.string().uuid() }),
+};
+
+export const tutorPayoutSchema = {
+  params: z.object({ id: z.string().uuid() }), // tutor USER id
+  body: z.object({
+    amountPaise: z.number().int().min(1),
+    reference: z.string().max(200).optional(),
+  }),
+};
+
 export const updateMeSchema = {
   body: z
     .object({
@@ -65,9 +136,14 @@ export const updateMeSchema = {
 // Account deletion is destructive + irreversible, so we re-confirm the current
 // password even though the access token already authenticates the request.
 export const deleteMeSchema = {
-  body: z.object({
-    password: z.string().min(1, 'Password is required to delete your account'),
-  }),
+  body: z
+    .object({
+      password: z.string().min(1).optional(),
+      googleIdToken: z.string().min(10).max(4096).optional(), // Google-only accounts
+    })
+    .refine((o) => o.password || o.googleIdToken, {
+      message: 'Provide your password (or Google sign-in) to delete your account',
+    }),
 };
 
 export const feedQuerySchema = {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { checkoutSchema, verifyPaymentSchema, adRewardSchema } from '../validators/schemas.js';
+import { adRewardSchema } from '../validators/schemas.js';
 import * as speaking from '../controllers/speaking.controller.js';
 import * as ads from '../controllers/ads.controller.js';
 import * as sub from '../controllers/subscription.controller.js';
@@ -30,17 +30,11 @@ notificationRouter.post('/devices', notif.registerDevice);
 notificationRouter.delete('/devices', notif.unregisterDevice);
 
 const subRouter = Router();
-// NOTE: webhook is mounted separately (raw body) in routes/index.js — not here.
+// Payments are Google Play only. The Razorpay routes (checkout / verify /
+// autopay / webhook) were removed — see subscription.controller.js for why.
 subRouter.use(requireAuth);
 subRouter.get('/', sub.getSubscription);
-subRouter.post('/checkout', validate(checkoutSchema), sub.checkout);
-subRouter.post('/verify', validate(verifyPaymentSchema), sub.verify);
-
 subRouter.post('/google/verify', gpurchase.verifyGoogleSubscription);
-
-subRouter.post('/autopay', sub.startAutopay);
-subRouter.post('/autopay/verify', sub.verifyAutopay);
-
 subRouter.post('/cancel', sub.cancelSubscription);
 
 export { speakingRouter, adsRouter, subRouter, notificationRouter };

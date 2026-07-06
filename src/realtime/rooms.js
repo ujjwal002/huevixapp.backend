@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db/prisma.js';
 
-import { consumeCallSeconds } from '../services/entitlement.service.js';
+import { consumeCallSeconds, consumeBalanceSeconds } from '../services/entitlement.service.js';
+import { accrueEarning } from '../services/tutor.service.js';
 
 
 // Active 1:1 call rooms, keyed by roomId. This is the in-memory source of truth
@@ -15,13 +16,13 @@ const socketRoom = new Map(); // socketId -> roomId (fast reverse lookup)
 
 // Create a room for a matched pair and persist a CONNECTING Call row. The
 // "caller" is the side that will send the first WebRTC offer.
-export async function createRoom({ callerSocket, calleeSocket, type = 'VIDEO' }) {
+export async function createRoom({ callerSocket, calleeSocket, type = 'VIDEO', kind = 'RANDOM' }) {
   const roomId = randomUUID();
   const callerId = callerSocket.data.userId;
   const calleeId = calleeSocket.data.userId;
 
   const call = await prisma.call.create({
-    data: { callerId, calleeId, type, status: 'CONNECTING' },
+    data: { callerId, calleeId, type, kind, status: 'CONNECTING' },
     select: { id: true },
   });
 
@@ -33,7 +34,9 @@ export async function createRoom({ callerSocket, calleeSocket, type = 'VIDEO' })
     callerSocketId: callerSocket.id,
     calleeSocketId: calleeSocket.id,
     type,
+    kind, // 'RANDOM' | 'TUTOR' — for TUTOR the callee is always the tutor
     startedAt: Date.now(),
+    activeAt: null, // set on first signaling; billing clock starts HERE
     markedActive: false,
   };
   rooms.set(roomId, room);
@@ -65,6 +68,7 @@ export async function markActive(roomId) {
   const room = rooms.get(roomId);
   if (!room || room.markedActive) return;
   room.markedActive = true;
+  room.activeAt = Date.now();
   await prisma.call
     .update({ where: { id: room.callId }, data: { status: 'ACTIVE' } })
     .catch(() => {});
@@ -79,7 +83,10 @@ export async function endRoom(roomId, { status } = {}) {
   socketRoom.delete(room.callerSocketId);
   socketRoom.delete(room.calleeSocketId);
 
-  const durationSec = Math.max(0, Math.round((Date.now() - room.startedAt) / 1000));
+  // Bill TALK time, not handshake time: the clock starts when signaling first
+  // flowed (activeAt), falling back to match time for legacy safety.
+  const billStart = room.activeAt || room.startedAt;
+  const durationSec = Math.max(0, Math.round((Date.now() - billStart) / 1000));
   const finalStatus = status || (room.markedActive ? 'ENDED' : 'MISSED');
   await prisma.call
     .update({
@@ -89,10 +96,24 @@ export async function endRoom(roomId, { status } = {}) {
     .catch(() => {});
 
   if (finalStatus === 'ENDED' && durationSec > 0) {
-    await Promise.all([
-      consumeCallSeconds(room.callerId, durationSec, room.type).catch(() => {}),
-      consumeCallSeconds(room.calleeId, durationSec, room.type).catch(() => {}),
-    ]);
+    if (room.kind === 'TUTOR') {
+      // Learner (caller) pays from the prepaid balance ONLY; the tutor
+      // (callee) pays nothing and EARNS per second. accrueEarning is
+      // idempotent on callId, so a crash-replay can't double-pay.
+      await Promise.all([
+        consumeBalanceSeconds(room.callerId, durationSec).catch(() => {}),
+        accrueEarning({
+          tutorUserId: room.calleeId,
+          callId: room.callId,
+          seconds: durationSec,
+        }).catch((e) => console.error('[tutor] earning accrual failed:', e.message)),
+      ]);
+    } else {
+      await Promise.all([
+        consumeCallSeconds(room.callerId, durationSec, room.type).catch(() => {}),
+        consumeCallSeconds(room.calleeId, durationSec, room.type).catch(() => {}),
+      ]);
+    }
   }
   return room;
 }

@@ -2,56 +2,13 @@ import { prisma } from '../db/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { config } from '../config/env.js';
-import { createPromoOrder, verifyPaymentSignature, refundPayment } from '../services/payment.service.js';
+import { refundPayment } from '../services/payment.service.js';
 import { notifyPromoLive } from '../services/notification.service.js';
 
 import * as gp from '../services/googlePlay.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 30;
-
-// POST /promos — create a draft promo + a Razorpay order for ₹299 × days.
-export const createPromo = asyncHandler(async (req, res) => {
-  const { startupName, title, body, ctaUrl, ctaText, imageUrl, days } = req.body;
-  const nDays = Math.min(Math.max(days || 1, 1), MAX_DAYS);
-  const amountPaise = config.pricing.promoPerDayInr * nDays * 100;
-
-  const promo = await prisma.startupPromo.create({
-    data: {
-      ownerId: req.user.id,
-      startupName, title, body,
-      ctaUrl, ctaText: ctaText || 'Visit',
-      imageUrl: imageUrl || null,
-      days: nDays, amountPaise, status: 'PENDING_PAYMENT',
-    },
-  });
-
-  const order = await createPromoOrder({ amountPaise, userId: req.user.id, promoId: promo.id });
-  await prisma.startupPromo.update({ where: { id: promo.id }, data: { razorpayOrderId: order.orderId } });
-
-  res.status(201).json({
-    promoId: promo.id, orderId: order.orderId,
-    amount: order.amount, currency: order.currency, keyId: order.keyId,
-    days: nDays, amountInr: config.pricing.promoPerDayInr * nDays, mock: !!order._mock,
-  });
-});
-
-// POST /promos/:id/confirm — verify the checkout signature, move to review.
-export const confirmPromoPayment = asyncHandler(async (req, res) => {
-  const { paymentId, signature } = req.body;
-  const promo = await prisma.startupPromo.findUnique({ where: { id: req.params.id } });
-  if (!promo || promo.ownerId !== req.user.id) throw ApiError.notFound('Promo not found');
-  if (promo.status !== 'PENDING_PAYMENT') return res.json({ id: promo.id, status: promo.status });
-
-  const ok = verifyPaymentSignature({ orderId: promo.razorpayOrderId, paymentId, signature });
-  if (!ok) throw ApiError.badRequest('Payment verification failed', 'PAYMENT_VERIFICATION_FAILED');
-
-  const updated = await prisma.startupPromo.update({
-    where: { id: promo.id },
-    data: { razorpayPaymentId: paymentId, status: 'PENDING_REVIEW' },
-  });
-  res.json({ id: updated.id, status: updated.status });
-});
 
 // --------------------------- Admin review ---------------------------------
 export const listPromosForReview = asyncHandler(async (_req, res) => {
@@ -185,36 +142,6 @@ export const listMyPromos = asyncHandler(async (req, res) => {
       createdAt: p.createdAt,
     })),
     nextCursor,
-  });
-});
-
-// POST /promos/:id/pay — resume payment for an unpaid promo (e.g. the user
-// backed out of checkout). Reuses the original Razorpay order if still stored,
-// so we don't leave orphan orders behind.
-export const resumePayment = asyncHandler(async (req, res) => {
-  const promo = await prisma.startupPromo.findUnique({ where: { id: req.params.id } });
-  if (!promo || promo.ownerId !== req.user.id) throw ApiError.notFound('Promo not found');
-  if (promo.status !== 'PENDING_PAYMENT') {
-    return res.json({ promoId: promo.id, status: promo.status, alreadyPaid: true });
-  }
-
-  let orderId = promo.razorpayOrderId;
-  if (!orderId) {
-    const order = await createPromoOrder({ amountPaise: promo.amountPaise, userId: req.user.id, promoId: promo.id });
-    orderId = order.orderId;
-    await prisma.startupPromo.update({ where: { id: promo.id }, data: { razorpayOrderId: orderId } });
-  }
-
-  const mock = config.mockExternal || !config.razorpay.keyId;
-  res.json({
-    promoId: promo.id,
-    orderId,
-    amount: promo.amountPaise,
-    currency: 'INR',
-    keyId: mock ? 'rzp_test_mock' : config.razorpay.keyId,
-    days: promo.days,
-    amountInr: Math.round(promo.amountPaise / 100),
-    mock,
   });
 });
 

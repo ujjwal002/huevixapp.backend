@@ -6,6 +6,7 @@ import { verifyPassword } from '../utils/password.js';
 import { getEntitlementSummary } from '../services/entitlement.service.js';
 import { deleteObject } from '../services/storage.service.js';
 import { cancelRecurringSubscription } from '../services/payment.service.js';
+import { verifyGoogleIdToken } from '../services/googleAuth.service.js';
 
 export const getMe = asyncHandler(async (req, res) => {
   const u = req.user;
@@ -18,6 +19,8 @@ export const getMe = asyncHandler(async (req, res) => {
     targetLanguage: u.targetLanguage,
     currentStreak: u.currentStreak,
     longestStreak: u.longestStreak,
+    emailVerified: u.emailVerified,
+    hasPassword: Boolean(u.passwordHash),
   });
 });
 
@@ -100,12 +103,25 @@ function urlToStorageKey(value) {
 //   - the user's stored objects (speaking recordings, promo images), which a
 //     DB cascade does NOT touch.
 export const deleteMe = asyncHandler(async (req, res) => {
-  const { password } = req.body;
+  const { password, googleIdToken } = req.body;
 
   // Re-authenticate. A stolen access token alone must not be able to wipe an
-  // account; the user has to prove the password too.
-  const ok = await verifyPassword(password, req.user.passwordHash);
-  if (!ok) throw ApiError.unauthorized('Password is incorrect', 'BAD_PASSWORD');
+  // account; the user proves ownership with their password — or, for
+  // Google-only accounts (no password), a FRESH Google ID token whose
+  // googleId matches the account.
+  if (req.user.passwordHash) {
+    if (!password) throw ApiError.badRequest('Password is required', 'PASSWORD_REQUIRED');
+    const ok = await verifyPassword(password, req.user.passwordHash);
+    if (!ok) throw ApiError.unauthorized('Password is incorrect', 'BAD_PASSWORD');
+  } else {
+    if (!googleIdToken) {
+      throw ApiError.badRequest('Confirm with Google sign-in to delete this account', 'GOOGLE_CONFIRM_REQUIRED');
+    }
+    const g = await verifyGoogleIdToken(googleIdToken);
+    if (g.googleId !== req.user.googleId) {
+      throw ApiError.unauthorized('Google account does not match', 'GOOGLE_MISMATCH');
+    }
+  }
 
   const userId = req.user.id;
 

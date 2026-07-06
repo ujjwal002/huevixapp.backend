@@ -14,6 +14,8 @@ import vocabTutorRoutes from './vocabTutor.routes.js';
 
 import callsRoutes from './calls.routes.js';
 
+import tutorRoutes from './tutor.routes.js';
+
 import * as gpurchase from '../controllers/googlePurchase.controller.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -93,6 +95,8 @@ router.use('/admin/settings', settingsRoutes);
 router.use('/vocab-tutor', vocabTutorRoutes);
 
 router.use('/calls', callsRoutes);
+
+router.use('/tutors', tutorRoutes);
 
 router.use('/quiz', quizRoutes);
 

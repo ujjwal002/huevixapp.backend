@@ -2,10 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import path from 'node:path';
 import { config } from './config/env.js';
 import routes from './routes/index.js';
-import { webhook } from './controllers/subscription.controller.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { globalLimiter } from './middleware/rateLimit.js';
 
@@ -64,22 +62,10 @@ if (config.env !== 'test') {
   }
 }
 
-// Razorpay webhook MUST receive the raw body for signature verification, so it
-// is mounted BEFORE the JSON body parser, with its own raw parser.
-app.post(
-  `${config.apiPrefix}/subscription/webhook`,
-  express.raw({ type: 'application/json' }),
-  (req, _res, next) => {
-    req.rawBody = req.body; // Buffer
-    try {
-      req.body = JSON.parse(req.body.toString('utf-8') || '{}');
-    } catch {
-      req.body = {};
-    }
-    next();
-  },
-  webhook
-);
+// NOTE: the Razorpay webhook (raw-body route) that used to be mounted here was
+// removed with the move to Google Play Billing. Google's equivalent is the
+// RTDN push endpoint at POST /google/rtdn/:secret (routes/index.js), which
+// works on parsed JSON — no raw body needed.
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));

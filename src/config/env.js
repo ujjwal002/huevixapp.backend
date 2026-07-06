@@ -133,6 +133,42 @@ export const config = {
     planMonthly: process.env.RAZORPAY_PLAN_MONTHLY,
   },
 
+  // Google Sign-In (the LOGIN feature; separate from Google Play billing).
+  // Comma-separated OAuth client IDs the app's ID tokens may be issued for —
+  // typically the Web client ID (Expo/React Native uses it for the idToken
+  // audience) plus the Android client ID.
+  googleOAuth: {
+    clientIds: (process.env.GOOGLE_OAUTH_CLIENT_IDS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
+
+  // Outbound email (verification + password-reset OTPs) over plain SMTP, so any
+  // provider works: Gmail app password, AWS SES, Resend, Brevo, ... In mock
+  // mode (or with no SMTP_HOST) codes are logged to the console instead.
+  email: {
+    // Preferred: Resend's HTTP API — set just RESEND_API_KEY (+ EMAIL_FROM).
+    resendApiKey: process.env.RESEND_API_KEY || '',
+    host: process.env.SMTP_HOST || '',
+    port: int(process.env.SMTP_PORT, 587),
+    secure: bool(process.env.SMTP_SECURE, false), // true for port 465
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.EMAIL_FROM || 'Huevix <no-reply@huevix.com>',
+    otpTtlMinutes: int(process.env.EMAIL_OTP_TTL_MINUTES, 15),
+    otpMaxAttempts: int(process.env.EMAIL_OTP_MAX_ATTEMPTS, 5),
+  },
+
+  // Tutor marketplace economics. Tutors EARN ratePaisePerHour per hour of
+  // ACTIVE talk time (₹150/hr default). Learners PAY for tutor calls from
+  // their prepaid callSecondsBalance ONLY (no free daily minutes) — so keep
+  // Play credit-pack pricing above ₹2.50/min or tutor calls lose money.
+  tutorMarket: {
+    ratePaisePerHour: int(process.env.TUTOR_RATE_INR_PER_HOUR, 150) * 100,
+    inviteTimeoutMs: int(process.env.TUTOR_INVITE_TIMEOUT_MS, 30_000),
+  },
+
   googlePlay: {
     packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME || '',
     // Full service-account JSON string OR a path to the key file — filled in later.

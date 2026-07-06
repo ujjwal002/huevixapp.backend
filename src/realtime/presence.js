@@ -23,3 +23,9 @@ export function isOnline(userId) {
 export function onlineCount() {
   return userSockets.size;
 }
+
+// All live socket ids for a user (a user can be connected from several
+// devices). Used to ring EVERY device on an incoming tutor call.
+export function socketsForUser(userId) {
+  return [...(userSockets.get(userId) || [])];
+}

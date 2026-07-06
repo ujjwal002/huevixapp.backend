@@ -1,35 +1,34 @@
 import { Router } from 'express';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, optionalAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { createPromoSchema, confirmPromoSchema, promoIdParam, rejectPromoSchema,promosMineQuerySchema } from '../validators/schemas.js';
-import * as promo from '../controllers/promo.controller.js';
-
-import {  optionalAuth } from '../middleware/auth.js';
+import {
+  createPromoSchema,
+  promoIdParam,
+  rejectPromoSchema,
+  promosMineQuerySchema,
+  confirmPromoGoogleSchema,
+} from '../validators/schemas.js';
 import { metricsLimiter, promoCreateLimiter } from '../middleware/rateLimit.js';
-
-import {confirmPromoGoogleSchema} from '../validators/schemas.js';
-
-
+import * as promo from '../controllers/promo.controller.js';
 
 const router = Router();
 
-router.post('/', requireAuth, promoCreateLimiter, validate(createPromoSchema), promo.createPromo);
-router.post('/:id/confirm', requireAuth, validate(confirmPromoSchema), promo.confirmPromoPayment);
+// --- Purchase (Google Play only; the Razorpay create/confirm/pay routes were
+// --- removed with the payments migration) ----------------------------------
+router.post('/google', requireAuth, promoCreateLimiter, validate(createPromoSchema), promo.createPromoGoogle);
+router.post('/:id/confirm-google', requireAuth, validate(confirmPromoGoogleSchema), promo.confirmPromoGoogle);
 
+// --- Admin review -----------------------------------------------------------
 router.get('/admin', requireAuth, requireAdmin, promo.listPromosForReview);
 router.post('/admin/:id/approve', requireAuth, requireAdmin, validate(promoIdParam), promo.approvePromo);
 router.post('/admin/:id/reject', requireAuth, requireAdmin, validate(rejectPromoSchema), promo.rejectPromo);
 
-// --- Feed serving + tracking + dashboard ---
+// --- Feed serving + tracking + dashboard ------------------------------------
 router.get('/active', optionalAuth, promo.listActivePromos);
 router.get('/mine', requireAuth, validate(promosMineQuerySchema), promo.listMyPromos);
 router.post('/:id/impression', requireAuth, metricsLimiter, validate(promoIdParam), promo.recordImpression);
 router.post('/:id/click', optionalAuth, metricsLimiter, validate(promoIdParam), promo.recordClick);
 
-router.post('/:id/pay', requireAuth, validate(promoIdParam), promo.resumePayment);
 router.delete('/:id', requireAuth, validate(promoIdParam), promo.deletePromo);
-
-router.post('/google', requireAuth, promoCreateLimiter, validate(createPromoSchema), promo.createPromoGoogle);
-router.post('/:id/confirm-google', requireAuth, validate(confirmPromoGoogleSchema), promo.confirmPromoGoogle);
 
 export default router;

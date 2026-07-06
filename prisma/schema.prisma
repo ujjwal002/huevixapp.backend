@@ -58,7 +58,9 @@ enum SpeakingSource {
 model User {
   id           String  @id @default(uuid())
   email        String  @unique
-  passwordHash String
+  passwordHash String?
+  googleId     String? @unique
+  emailVerified Boolean @default(false)
   name         String?
   role         Role    @default(USER)
 
@@ -115,6 +117,11 @@ model User {
 
   callsMade     Call[] @relation("CallsMade")
   callsReceived Call[] @relation("CallsReceived")
+
+  emailTokens   EmailToken[]
+  tutorProfile  TutorProfile?
+  tutorEarnings TutorEarning[]
+  tutorPayouts  TutorPayout[]
 
   blocksMade      Block[]  @relation("BlocksMade")
   blocksReceived  Block[]  @relation("BlocksReceived")
@@ -460,6 +467,7 @@ model Call {
   callerId    String
   calleeId    String
   type        CallType   @default(VIDEO)
+  kind        String     @default("RANDOM") // RANDOM | TUTOR (callee is the tutor)
   status      CallStatus @default(CONNECTING)
   startedAt   DateTime   @default(now())
   endedAt     DateTime?
@@ -647,4 +655,91 @@ model MonthlyWinner {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status])
+}
+
+
+// ---------------------------------------------------------------------------
+// Email verification + password reset (6-digit OTP, hashed at rest)
+// ---------------------------------------------------------------------------
+
+enum EmailTokenType {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+}
+
+model EmailToken {
+  id        String         @id @default(uuid())
+  userId    String
+  type      EmailTokenType
+  codeHash  String // sha256(OTP) — the plaintext code is only ever emailed
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int            @default(0) // wrong guesses; token burns at the cap
+  createdAt DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Tutor marketplace — admin-approved tutors who earn per second of talk time
+// ---------------------------------------------------------------------------
+
+enum TutorStatus {
+  PENDING // applied, awaiting admin review
+  APPROVED // can go online and take calls
+  REJECTED
+  SUSPENDED // was approved; admin pulled them (bad behaviour etc.)
+}
+
+model TutorProfile {
+  id              String      @id @default(uuid())
+  userId          String      @unique
+  bio             String
+  languages       String      @default("en") // comma-separated ISO codes
+  experience      String?
+  upiId           String // where manual payouts are sent
+  status          TutorStatus @default(PENDING)
+  rejectionReason String?
+  isOnline        Boolean     @default(false) // availability toggle (self-serve)
+  // What the TUTOR earns, in paise per hour (₹150/hr = 15000). Snapshotted per
+  // profile so a future rate change never rewrites past earnings.
+  ratePaisePerHour Int        @default(15000)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, isOnline])
+}
+
+// Immutable per-call earnings ledger. unique(callId) makes accrual idempotent:
+// a retried endRoom can never pay a tutor twice for the same call.
+model TutorEarning {
+  id          String   @id @default(uuid())
+  tutorUserId String
+  callId      String   @unique
+  seconds     Int
+  amountPaise Int
+  createdAt   DateTime @default(now())
+
+  tutor User @relation(fields: [tutorUserId], references: [id], onDelete: Cascade)
+
+  @@index([tutorUserId, createdAt])
+}
+
+// Manual payout record: admin pays the UPI, then logs it here. Balance owed =
+// sum(TutorEarning.amountPaise) - sum(TutorPayout.amountPaise).
+model TutorPayout {
+  id          String   @id @default(uuid())
+  tutorUserId String
+  amountPaise Int
+  upiId       String // snapshot of where it was actually sent
+  reference   String? // UPI txn id / note
+  createdAt   DateTime @default(now())
+
+  tutor User @relation(fields: [tutorUserId], references: [id], onDelete: Cascade)
+
+  @@index([tutorUserId, createdAt])
 }

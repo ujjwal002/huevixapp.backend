@@ -31,8 +31,8 @@ import 'dotenv/config';
 import { Expo } from 'expo-server-sdk';
 import { prisma } from '../src/db/prisma.js';
 
-const title = process.argv[2] || "💙 Thank You!";
-const body = process.argv[3] || "Amazing people! Thanks for trying our app. If you opted out, we'd love your feedback—it helps us improve.";
+const title = process.argv[2] || "Hello guys !";
+const body = process.argv[3] || "Please open the app and check if you have any new articles !";
 
 const expo = new Expo(
   process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : undefined

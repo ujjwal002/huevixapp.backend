@@ -46,6 +46,15 @@ describe('verifyPaymentSignature', () => {
     expect(verifyPaymentSignature({ orderId: 'o', paymentId: 'p', signature: 'whatever' })).toBe(true);
   });
 
+  it('FAILS CLOSED in real mode when no secret is configured', () => {
+    // Regression guard: this exact combination (real mode + missing Razorpay
+    // keys, i.e. any Google-Play-only deployment) used to return true and made
+    // /subscription/verify a free-premium endpoint.
+    config.mockExternal = false;
+    config.razorpay.keySecret = undefined;
+    expect(verifyPaymentSignature({ orderId: 'o', paymentId: 'p', signature: 'x' })).toBe(false);
+  });
+
   it('validates a correct HMAC and rejects a forged one in real mode', () => {
     config.mockExternal = false;
     config.razorpay.keySecret = 'test_secret';

@@ -11,9 +11,13 @@ import { startOfUtcDay, isSameUtcDay } from '../utils/dates.js';
 
 export function isSubscriptionActive(user) {
   const sub = user.subscription;
-  return Boolean(
-    sub && sub.status === 'ACTIVE' && sub.currentPeriodEnd && new Date(sub.currentPeriodEnd) > new Date()
-  );
+  if (!sub || !sub.currentPeriodEnd) return false;
+  // ACTIVE: paid & renewing. CANCELED: auto-renew is off (user cancelled in the
+  // Play Store / legacy Razorpay cancel) but the paid period hasn't ended —
+  // they keep access until currentPeriodEnd. Google's own SUBSCRIPTION_STATE_
+  // CANCELED means exactly this. EXPIRED/PENDING never grant access.
+  if (sub.status !== 'ACTIVE' && sub.status !== 'CANCELED') return false;
+  return new Date(sub.currentPeriodEnd) > new Date();
 }
 
 // Race-safe "reset this counter once per UTC day" primitive. The conditional
@@ -354,4 +358,47 @@ export async function addCallSeconds(userId, seconds) {
     select: { callSecondsBalance: true },
   });
   return updated.callSecondsBalance;
+}
+// ===========================================================================
+// TUTOR calls — paid from the prepaid balance ONLY (no free daily minutes:
+// every tutor second costs the platform real money, so it must be revenue-
+// backed). Both AUDIO and VIDEO tutor calls follow the same rule.
+// ===========================================================================
+
+export async function getTutorCallAccessById(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, callSecondsBalance: true },
+  });
+  if (!user) return { allowed: false, reason: 'USER_NOT_FOUND', message: 'User not found' };
+
+  const balance = user.callSecondsBalance ?? 0;
+  const minStart = config.calls.minStartSeconds;
+  if (balance >= minStart) {
+    return { allowed: true, balanceSeconds: balance, minStartSeconds: minStart };
+  }
+  return {
+    allowed: false,
+    reason: 'NO_TUTOR_BALANCE',
+    message: 'Tutor calls use call credits. Recharge to talk to a tutor.',
+    balanceSeconds: balance,
+    minStartSeconds: minStart,
+  };
+}
+
+// Spend prepaid seconds only, floored at zero — a pair of CONDITIONAL updates
+// so a concurrent spend can't interleave between a read and a write.
+export async function consumeBalanceSeconds(userId, seconds) {
+  const secs = Math.max(0, Math.round(seconds || 0));
+  if (secs === 0) return;
+  const r = await prisma.user.updateMany({
+    where: { id: userId, callSecondsBalance: { gte: secs } },
+    data: { callSecondsBalance: { decrement: secs } },
+  });
+  if (r.count === 0) {
+    await prisma.user.updateMany({
+      where: { id: userId, callSecondsBalance: { gt: 0 } },
+      data: { callSecondsBalance: 0 },
+    });
+  }
 }
