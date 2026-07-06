@@ -263,9 +263,14 @@ model Subscription {
   userId           String             @unique
   plan             SubscriptionPlan
   status           SubscriptionStatus @default(PENDING)
-  provider         String             @default("razorpay")
+  provider         String             @default("google_play")
   providerOrderId  String?
-  providerRefId    String? // payment id / subscription id
+  // Google Play purchaseToken (or legacy Razorpay payment/subscription id).
+  // UNIQUE: a purchase token can only ever be claimed by ONE user's
+  // subscription — the DB-level backstop against token sharing/replay
+  // ("buy once, activate many accounts"). Nullable uniques allow multiple
+  // NULLs in Postgres, so PENDING rows without a token are unaffected.
+  providerRefId    String?            @unique
   currentPeriodEnd DateTime?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
