@@ -169,8 +169,8 @@ export const verifyGoogleProduct = asyncHandler(async (req, res) => {
   if (!purchaseToken || typeof purchaseToken !== 'string') {
     throw ApiError.badRequest('purchaseToken is required', 'MISSING_TOKEN');
   }
-  const seconds = config.googlePlay.creditPacks[productId];
-  if (!seconds) throw ApiError.badRequest('Unknown product', 'UNKNOWN_PRODUCT');
+  const coins = config.googlePlay.creditPacks[productId]; // value is COINS
+  if (!coins) throw ApiError.badRequest('Unknown product', 'UNKNOWN_PRODUCT');
 
   const product = await gp.getProduct(productId, purchaseToken);
   if (product.purchaseState !== gp.PRODUCT_PURCHASED) {
@@ -192,18 +192,18 @@ export const verifyGoogleProduct = asyncHandler(async (req, res) => {
       });
       const u = await tx.user.update({
         where: { id: req.user.id },
-        data: { callSecondsBalance: { increment: seconds } },
-        select: { callSecondsBalance: true },
+        data: { coinBalance: { increment: coins } },
+        select: { coinBalance: true },
       });
-      return u.callSecondsBalance;
+      return u.coinBalance;
     });
   } catch (e) {
     if (e?.code === 'P2002') {
       const u = await prisma.user.findUnique({
         where: { id: req.user.id },
-        select: { callSecondsBalance: true },
+        select: { coinBalance: true },
       });
-      return res.json({ success: true, duplicate: true, balanceSeconds: u?.callSecondsBalance ?? 0 });
+      return res.json({ success: true, duplicate: true, coinBalance: u?.coinBalance ?? 0 });
     }
     throw e;
   }
@@ -212,7 +212,7 @@ export const verifyGoogleProduct = asyncHandler(async (req, res) => {
   // call gp.acknowledgeProduct instead and set a flag on the user.)
   await gp.consumeProduct(productId, purchaseToken);
 
-  res.json({ success: true, creditedSeconds: seconds, balanceSeconds: balance });
+  res.json({ success: true, creditedCoins: coins, coinBalance: balance });
 });
 
 // ---- POST /google/rtdn/:secret ---------------------------------------------
@@ -361,16 +361,16 @@ async function handleVoidedPurchase(tx, purchaseToken) {
   // interleave between a read and a write.
   const processed = await tx.processedPurchase.findUnique({ where: { purchaseToken } });
   if (processed) {
-    const seconds = config.googlePlay.creditPacks[processed.productId] || 0;
-    if (seconds > 0) {
+    const coins = config.googlePlay.creditPacks[processed.productId] || 0;
+    if (coins > 0) {
       const r = await tx.user.updateMany({
-        where: { id: processed.userId, callSecondsBalance: { gte: seconds } },
-        data: { callSecondsBalance: { decrement: seconds } },
+        where: { id: processed.userId, coinBalance: { gte: coins } },
+        data: { coinBalance: { decrement: coins } },
       });
       if (r.count === 0) {
         await tx.user.updateMany({
           where: { id: processed.userId },
-          data: { callSecondsBalance: 0 },
+          data: { coinBalance: 0 },
         });
       }
     }

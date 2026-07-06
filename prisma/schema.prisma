@@ -110,6 +110,8 @@ model User {
   deviceTokens DeviceToken[]
 
   callSecondsBalance   Int       @default(0)
+  coinBalance        Int @default(0)
+  adCallGrantsToday  Int @default(0)
   callSecondsUsedToday Int       @default(0)
   callSecondsDate      DateTime? @db.Date
 

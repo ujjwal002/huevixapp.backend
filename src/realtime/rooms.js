@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db/prisma.js';
 
-import { consumeCallSeconds, consumeBalanceSeconds } from '../services/entitlement.service.js';
+import {
+  consumeCallSeconds,
+  consumeBalanceSeconds,
+  remainingCallSeconds,
+} from '../services/entitlement.service.js';
 import { accrueEarning } from '../services/tutor.service.js';
 
 
@@ -131,4 +135,94 @@ export async function handleDisconnect(io, socket) {
 
 export function activeCallCount() {
   return rooms.size;
+}
+
+// ===========================================================================
+// Billing watchdog — LIVE balance enforcement.
+//
+// Charging happens at call end; without this, a call could run far past what
+// the payer can afford (gate-at-start only). Every WATCHDOG_MS we compare each
+// active room's elapsed talk time against what its payer(s) can afford:
+//   RANDOM: both participants pay -> whoever runs out first ends the call.
+//   TUTOR:  only the learner (caller) pays.
+// A LOW warning fires once so the app can show "1 minute left".
+// When time is up: the exhausted payer gets call_denied (recharge message),
+// everyone else gets peer_left, and the room is finalized (which performs the
+// charge; the spend floor absorbs the few seconds of watchdog latency).
+// ===========================================================================
+const WATCHDOG_MS = 10_000;
+const LOW_WARN_SEC = 60;
+
+// Per-payer affordable seconds: [{ userId, socketId, affordable }]
+async function roomPayerBudgets(room) {
+  const payers =
+    room.kind === 'TUTOR'
+      ? [{ userId: room.callerId, socketId: room.callerSocketId }]
+      : [
+          { userId: room.callerId, socketId: room.callerSocketId },
+          { userId: room.calleeId, socketId: room.calleeSocketId },
+        ];
+  const opts = { kind: room.kind, type: room.type };
+  return Promise.all(
+    payers.map(async (p) => ({
+      ...p,
+      affordable: await remainingCallSeconds(p.userId, opts).catch(() => Infinity),
+    }))
+  );
+}
+
+async function watchdogTick(io) {
+  for (const room of [...rooms.values()]) {
+    if (!room.markedActive || !room.activeAt) continue;
+    try {
+      const elapsed = Math.round((Date.now() - room.activeAt) / 1000);
+      // Cache each payer's affordable total; balances only change at call
+      // end, so one DB read per payer per call is enough — refreshed every
+      // ~60s of talk in case of concurrent activity on the account.
+      if (!room._budgets || elapsed - (room._budgetsAt ?? 0) > 60) {
+        room._budgets = await roomPayerBudgets(room);
+        room._budgetsAt = elapsed;
+      }
+      const exhausted = room._budgets.filter((b) => b.affordable - elapsed <= 0);
+      const minLeft = Math.min(...room._budgets.map((b) => b.affordable - elapsed));
+
+      if (minLeft <= LOW_WARN_SEC && minLeft > 0 && !room._lowWarned) {
+        room._lowWarned = true;
+        io.to(room.roomId).emit('call_balance_low', {
+          roomId: room.roomId,
+          secondsLeft: Math.max(0, minLeft),
+        });
+      }
+
+      if (exhausted.length > 0) {
+        const exhaustedSockets = new Set(exhausted.map((b) => b.socketId));
+        // Whoever ran out gets the recharge message...
+        for (const sid of exhaustedSockets) {
+          io.to(sid).emit('call_denied', {
+            reason: 'BALANCE_EXHAUSTED',
+            message:
+              room.kind === 'TUTOR'
+                ? 'You ran out of coins. Recharge to keep talking to tutors.'
+                : 'Your call time ran out. Recharge to keep practising.',
+          });
+        }
+        // ...everyone else just sees the peer leave.
+        for (const sid of [room.callerSocketId, room.calleeSocketId]) {
+          if (!exhaustedSockets.has(sid)) {
+            io.to(sid).emit('peer_left', { roomId: room.roomId, reason: 'balance_exhausted' });
+          }
+        }
+        await endRoom(room.roomId, { status: 'ENDED' });
+      }
+    } catch (e) {
+      console.error('[billing-watchdog]', e.message);
+    }
+  }
+}
+
+let watchdogTimer = null;
+export function startBillingWatchdog(io) {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(() => watchdogTick(io), WATCHDOG_MS);
+  if (typeof watchdogTimer.unref === 'function') watchdogTimer.unref();
 }

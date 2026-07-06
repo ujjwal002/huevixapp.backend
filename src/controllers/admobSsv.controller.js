@@ -27,6 +27,7 @@ import crypto from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
+import { grantAdCallSeconds } from '../services/entitlement.service.js';
 
 const KEYS_URL = 'https://www.gstatic.com/admob/reward/verifier-keys.json';
 
@@ -131,6 +132,7 @@ export const admobSsv = asyncHandler(async (req, res) => {
   const userId = String(params.user_id || '');       // set by the app on the ad request
   const transactionId = String(params.transaction_id || '');
   const rewardItem = String(params.reward_item || '');
+  const customData = String(params.custom_data || ''); // set by the app: 'call' | '' (speaking)
 
   if (!keyId || !signatureB64Url) return res.status(400).send('bad request');
 
@@ -171,9 +173,14 @@ export const admobSsv = asyncHandler(async (req, res) => {
   if (await alreadyProcessed(transactionId)) {
     return res.status(200).send('ok');
   }
-  const result = await grantAdCreditByUserId(userId);
+  // Route the grant by the app-declared placement: the Talk tab requests
+  // 'call' (free call minutes); everything else stays a speaking credit.
+  const result =
+    customData === 'call'
+      ? await grantAdCallSeconds(userId)
+      : await grantAdCreditByUserId(userId);
   if (result.granted) {
-    await markProcessed(transactionId, userId, rewardItem);
+    await markProcessed(transactionId, userId, customData === 'call' ? 'ad_call_minutes' : rewardItem);
   }
   // Always 200 to AdMob on a validly-signed callback (even if capped), so it
   // doesn't keep retrying.

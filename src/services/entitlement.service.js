@@ -234,7 +234,7 @@ export async function ensureDailyCallSeconds(user) {
   if (!isSameUtcDay(user.callSecondsDate, today)) {
     await resetIfNewDay(user.id, {
       dateField: 'callSecondsDate',
-      zeroFields: ['callSecondsUsedToday'],
+      zeroFields: ['callSecondsUsedToday', 'adCallGrantsToday'],
     });
     const fresh = await prisma.user.findUnique({
       where: { id: user.id },
@@ -246,27 +246,41 @@ export async function ensureDailyCallSeconds(user) {
 }
 
 function callSummaryFrom(user) {
-  const freeDaily = config.calls.freeDailySeconds; // AUDIO-only free allowance
+  const freeDaily = config.calls.freeDailySeconds; // AUDIO-only free allowance (seconds)
   const usedToday = user.callSecondsUsedToday ?? 0;
-  const balance = user.callSecondsBalance ?? 0;
+  const coins = user.coinBalance ?? 0;
+  const perSecNormal = config.coins.normalPerSec;
+  const perSecTutor = config.coins.tutorPerSec;
   const freeLeft = Math.max(0, freeDaily - usedToday);
   const minStart = config.calls.minStartSeconds;
 
-  // Free minutes apply to AUDIO only. VIDEO always draws on the prepaid balance.
-  const audioLeft = freeLeft + balance; // audio can use free + prepaid
-  const videoLeft = balance; // video is prepaid only
+  // Legacy seconds view derived from coins so OLD app builds keep working:
+  // "balanceSeconds" = how many NORMAL-call seconds the coins are worth.
+  const balanceSecondsFromCoins = Math.floor(coins / perSecNormal);
+  const tutorSecondsFromCoins = Math.floor(coins / perSecTutor);
+
+  // Free time applies to AUDIO only. VIDEO (and everything tutor) is coins-only.
+  const audioLeft = freeLeft + balanceSecondsFromCoins;
+  const videoLeft = balanceSecondsFromCoins;
 
   return {
+    // --- coin economy (new apps read these) ---
+    coinBalance: coins,
+    coinsPerSecNormal: perSecNormal,
+    coinsPerSecTutor: perSecTutor,
+    tutorSecondsLeft: tutorSecondsFromCoins,
+    canStartTutor: coins >= perSecTutor * minStart,
+    // --- legacy seconds view (old apps keep working) ---
     freeDailySeconds: freeDaily,
     freeSecondsLeft: freeLeft, // audio-only free time left today
-    balanceSeconds: balance, // prepaid; usable for audio OR video
+    balanceSeconds: balanceSecondsFromCoins,
     audioSecondsLeft: audioLeft,
     videoSecondsLeft: videoLeft,
-    totalSecondsLeft: audioLeft, // most permissive (audio) — kept for back-compat
+    totalSecondsLeft: audioLeft,
     minStartSeconds: minStart,
     canStartAudio: audioLeft >= minStart,
     canStartVideo: videoLeft >= minStart,
-    canStartCall: audioLeft >= minStart, // back-compat: can start *some* call
+    canStartCall: audioLeft >= minStart,
   };
 }
 
@@ -298,7 +312,7 @@ export async function getCallAccessById(userId, type = 'AUDIO') {
     where: { id: userId },
     select: {
       id: true,
-      callSecondsBalance: true,
+      coinBalance: true,
       callSecondsUsedToday: true,
       callSecondsDate: true,
     },
@@ -319,7 +333,7 @@ export async function consumeCallSeconds(userId, seconds, type = 'AUDIO') {
     where: { id: userId },
     select: {
       id: true,
-      callSecondsBalance: true,
+      coinBalance: true,
       callSecondsUsedToday: true,
       callSecondsDate: true,
     },
@@ -328,36 +342,59 @@ export async function consumeCallSeconds(userId, seconds, type = 'AUDIO') {
   await ensureDailyCallSeconds(user);
 
   const freeDaily = config.calls.freeDailySeconds;
-  // Free daily seconds are AUDIO-only; VIDEO is always paid from the balance.
+  // Free daily seconds are AUDIO-only; VIDEO is always paid in coins.
   const freeLeft =
     type === 'VIDEO' ? 0 : Math.max(0, freeDaily - (user.callSecondsUsedToday ?? 0));
   const fromFree = Math.min(secs, freeLeft);
-  const fromBalance = Math.min(secs - fromFree, user.callSecondsBalance ?? 0);
+  const paidSecs = secs - fromFree;
 
-  const data = {};
-  if (fromFree > 0) data.callSecondsUsedToday = { increment: fromFree };
-  if (fromBalance > 0) data.callSecondsBalance = { decrement: fromBalance };
-  if (Object.keys(data).length) {
-    await prisma.user.update({ where: { id: userId }, data });
+  if (fromFree > 0) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { callSecondsUsedToday: { increment: fromFree } },
+    });
+  }
+  if (paidSecs > 0) {
+    await spendCoins(userId, paidSecs * config.coins.normalPerSec);
   }
 }
 
-// Recharge: add prepaid call seconds. Returns the new prepaid balance.
-export async function addCallSeconds(userId, seconds) {
-  const secs = Math.max(0, Math.round(seconds || 0));
-  if (secs === 0) {
-    const u = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { callSecondsBalance: true },
+// Spend coins, floored at zero, as a pair of CONDITIONAL updates so a
+// concurrent spend can't interleave between a read and a write. Post-call
+// best-effort accounting: a call can overshoot slightly; the floor absorbs it.
+async function spendCoins(userId, coins) {
+  const amount = Math.max(0, Math.round(coins || 0));
+  if (amount === 0) return;
+  const r = await prisma.user.updateMany({
+    where: { id: userId, coinBalance: { gte: amount } },
+    data: { coinBalance: { decrement: amount } },
+  });
+  if (r.count === 0) {
+    await prisma.user.updateMany({
+      where: { id: userId, coinBalance: { gt: 0 } },
+      data: { coinBalance: 0 },
     });
-    return u?.callSecondsBalance ?? 0;
   }
+}
+
+// Grant purchased coins. Returns the new coin balance.
+export async function addCoins(userId, coins) {
+  const amount = Math.max(0, Math.round(coins || 0));
   const updated = await prisma.user.update({
     where: { id: userId },
-    data: { callSecondsBalance: { increment: secs } },
-    select: { callSecondsBalance: true },
+    data: amount > 0 ? { coinBalance: { increment: amount } } : {},
+    select: { coinBalance: true },
   });
-  return updated.callSecondsBalance;
+  return updated.coinBalance;
+}
+
+// LEGACY wrapper (dev-mock recharge speaks in seconds): grants the coin
+// equivalent of N normal-call seconds. Returns the seconds-view balance so old
+// callers keep getting a sane number.
+export async function addCallSeconds(userId, seconds) {
+  const secs = Math.max(0, Math.round(seconds || 0));
+  const coins = await addCoins(userId, secs * config.coins.normalPerSec);
+  return Math.floor(coins / config.coins.normalPerSec);
 }
 // ===========================================================================
 // TUTOR calls — paid from the prepaid balance ONLY (no free daily minutes:
@@ -368,37 +405,82 @@ export async function addCallSeconds(userId, seconds) {
 export async function getTutorCallAccessById(userId) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, callSecondsBalance: true },
+    select: { id: true, coinBalance: true },
   });
   if (!user) return { allowed: false, reason: 'USER_NOT_FOUND', message: 'User not found' };
 
-  const balance = user.callSecondsBalance ?? 0;
-  const minStart = config.calls.minStartSeconds;
-  if (balance >= minStart) {
-    return { allowed: true, balanceSeconds: balance, minStartSeconds: minStart };
+  const coins = user.coinBalance ?? 0;
+  const perSec = config.coins.tutorPerSec;
+  const minCoins = perSec * config.calls.minStartSeconds; // e.g. 12 * 20 = 240
+  if (coins >= minCoins) {
+    return {
+      allowed: true,
+      coinBalance: coins,
+      tutorSecondsLeft: Math.floor(coins / perSec),
+      balanceSeconds: Math.floor(coins / config.coins.normalPerSec), // legacy view
+    };
   }
   return {
     allowed: false,
     reason: 'NO_TUTOR_BALANCE',
-    message: 'Tutor calls use call credits. Recharge to talk to a tutor.',
-    balanceSeconds: balance,
-    minStartSeconds: minStart,
+    message: 'Tutor calls use coins. Get coins to talk to a tutor.',
+    coinBalance: coins,
+    balanceSeconds: Math.floor(coins / config.coins.normalPerSec),
   };
 }
 
-// Spend prepaid seconds only, floored at zero — a pair of CONDITIONAL updates
-// so a concurrent spend can't interleave between a read and a write.
+// Rewarded-ad grant: N seconds of FREE normal-call time (audio-only). Stored
+// by DECREMENTING callSecondsUsedToday (may go negative), which the free-left
+// math (freeDaily - usedToday) naturally turns into extra free time. Expires
+// at the UTC midnight reset; can never be spent on tutor calls or converted
+// to coins. Daily-capped; the conditional update makes the cap race-safe.
+export async function grantAdCallSeconds(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, callSecondsUsedToday: true, callSecondsDate: true, adCallGrantsToday: true },
+  });
+  if (!user) return { granted: false, reason: 'USER_NOT_FOUND' };
+  await ensureDailyCallSeconds(user);
+
+  const max = config.entitlement.maxAdCallGrantsPerDay;
+  const secs = config.entitlement.adRewardCallSeconds;
+  const r = await prisma.user.updateMany({
+    where: { id: userId, adCallGrantsToday: { lt: max } },
+    data: {
+      callSecondsUsedToday: { decrement: secs },
+      adCallGrantsToday: { increment: 1 },
+    },
+  });
+  if (r.count === 0) return { granted: false, reason: 'DAILY_AD_LIMIT' };
+  return { granted: true, seconds: secs };
+}
+
+// Live-billing watchdog support: how many MORE seconds can this user afford
+// for a call of this kind/type, given balances as of call start? (Balances
+// only change at call end, so this is stable for the duration of one call.)
+export async function remainingCallSeconds(userId, { kind = 'RANDOM', type = 'AUDIO' } = {}) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { coinBalance: true, callSecondsUsedToday: true, callSecondsDate: true },
+  });
+  if (!user) return 0;
+
+  const coins = user.coinBalance ?? 0;
+  if (kind === 'TUTOR') {
+    return Math.floor(coins / config.coins.tutorPerSec);
+  }
+  await ensureDailyCallSeconds(user);
+  const freeLeft =
+    type === 'VIDEO'
+      ? 0
+      : Math.max(0, config.calls.freeDailySeconds - (user.callSecondsUsedToday ?? 0));
+  return freeLeft + Math.floor(coins / config.coins.normalPerSec);
+}
+
+// Tutor-call billing: every second costs coins.tutorPerSec (3x normal).
+// Same name as the pre-coin function so rooms.js needs no change.
 export async function consumeBalanceSeconds(userId, seconds) {
   const secs = Math.max(0, Math.round(seconds || 0));
   if (secs === 0) return;
-  const r = await prisma.user.updateMany({
-    where: { id: userId, callSecondsBalance: { gte: secs } },
-    data: { callSecondsBalance: { decrement: secs } },
-  });
-  if (r.count === 0) {
-    await prisma.user.updateMany({
-      where: { id: userId, callSecondsBalance: { gt: 0 } },
-      data: { callSecondsBalance: 0 },
-    });
-  }
+  await spendCoins(userId, secs * config.coins.tutorPerSec);
 }

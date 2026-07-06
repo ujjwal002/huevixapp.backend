@@ -6,7 +6,7 @@ import { addPresence, removePresence, onlineCount } from './presence.js';
 import { registerMatchmaking, leaveQueue } from './matchmaking.js';
 import { registerTutorCalls, cleanupTutorInvites } from './tutorCalls.js';
 import { registerSignaling } from './signaling.js';
-import { handleDisconnect } from './rooms.js';
+import { handleDisconnect, startBillingWatchdog } from './rooms.js';
 
 let io = null;
 
@@ -66,6 +66,8 @@ export function initRealtime(httpServer) {
       next(err);
     }
   });
+
+  startBillingWatchdog(io);
 
   io.on('connection', (socket) => {
     addPresence(socket.data.userId, socket.id);

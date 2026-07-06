@@ -62,6 +62,10 @@ export const config = {
     freeSpeakingTrial: int(process.env.FREE_SPEAKING_TRIAL, 3),
     paidDailySpeakingLimit: int(process.env.PAID_DAILY_SPEAKING_LIMIT, 30),
     maxAdCreditsPerDay: int(process.env.MAX_AD_CREDITS_PER_DAY, 3),
+    // Rewarded ad -> free NORMAL-call time (audio-only, expires at UTC
+    // midnight, can never fund tutor calls). 2 min per ad, 5 ads/day.
+    adRewardCallSeconds: int(process.env.AD_REWARD_CALL_SECONDS, 120),
+    maxAdCallGrantsPerDay: int(process.env.MAX_AD_CALL_GRANTS_PER_DAY, 5),
   },
 
   pricing: {
@@ -164,6 +168,15 @@ export const config = {
   // ACTIVE talk time (₹150/hr default). Learners PAY for tutor calls from
   // their prepaid callSecondsBalance ONLY (no free daily minutes) — so keep
   // Play credit-pack pricing above ₹2.50/min or tutor calls lose money.
+  // Coin economy. Purchased coins are the only paid currency; the free daily
+  // allowance stays denominated in seconds (audio, normal calls only).
+  //   normal call: 4 coins/sec (240/min)  -> ₹99 pack ≈ 50 normal minutes
+  //   tutor call: 12 coins/sec (720/min)  -> ₹99 pack ≈ 16.6 tutor minutes
+  coins: {
+    normalPerSec: int(process.env.COINS_NORMAL_PER_SEC, 4),
+    tutorPerSec: int(process.env.COINS_TUTOR_PER_SEC, 12),
+  },
+
   tutorMarket: {
     ratePaisePerHour: int(process.env.TUTOR_RATE_INR_PER_HOUR, 150) * 100,
     inviteTimeoutMs: int(process.env.TUTOR_INVITE_TIMEOUT_MS, 30_000),
@@ -177,10 +190,16 @@ export const config = {
     subYearlyId: process.env.GOOGLE_SUB_YEARLY_ID || 'premium_yearly',
     rtdnSecret: process.env.GOOGLE_RTDN_SECRET || '',
     // One-time consumable packs: productId -> SECONDS of call credit granted.
+    // Play product id -> COINS granted. Legacy minute packs keep working and
+    // grant their old value in coins (1 old second = 4 coins).
     creditPacks: {
-      [process.env.GOOGLE_PACK_30MIN_ID || 'call_credits_30min']: 30 * 60,
-      [process.env.GOOGLE_PACK_60MIN_ID || 'call_credits_60min']: 60 * 60,
-      [process.env.GOOGLE_PACK_120MIN_ID || 'call_credits_120min']: 120 * 60,
+      [process.env.GOOGLE_PACK_30MIN_ID || 'call_credits_30min']: 30 * 60 * 4,
+      [process.env.GOOGLE_PACK_60MIN_ID || 'call_credits_60min']: 60 * 60 * 4,
+      [process.env.GOOGLE_PACK_120MIN_ID || 'call_credits_120min']: 120 * 60 * 4,
+      coins_5500: 5500, // ₹49
+      coins_12000: 12000, // ₹99
+      coins_26000: 26000, // ₹199
+      coins_56000: 56000, // ₹399
     },
   },
 
