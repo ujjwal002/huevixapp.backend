@@ -1,10 +1,15 @@
 import rateLimit from 'express-rate-limit';
+import { config } from '../config/env.js';
 
 export const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 600,
   standardHeaders: true,
   legacyHeaders: false,
+  // Never rate-limit the health check: it's a monitoring endpoint (UptimeRobot
+  // polls it every few minutes from fixed IPs), and a 429 here would trip false
+  // "down" alerts. It's a trivial DB ping, so it's safe to leave uncapped.
+  skip: (req) => req.originalUrl === `${config.apiPrefix}/health`,
 });
 
 // Tighter limit on auth to slow credential stuffing.

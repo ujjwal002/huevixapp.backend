@@ -17,6 +17,8 @@ node prisma/seed-sponsored.js
 npx prisma db push
 pm2 restart huevix-backend
 
+k6 run load-test.js
+
 
 curl -X POST http://localhost:4000/api/v1/cards/admin-article \
   -H "Authorization: Bearer <ADMIN_ACCESS_TOKEN>" \
