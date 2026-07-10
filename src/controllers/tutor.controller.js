@@ -120,7 +120,16 @@ export const listOnline = asyncHandler(async (req, res) => {
     include: { user: { select: { id: true, name: true } } },
     take: 100,
   });
-  const items = rows.filter((p) => isConnected(p.userId)).map((p) => publicTutor(p, p.user));
+  // Reachable = live socket (in-app) OR has a push device (notification ring
+  // wakes the closed app). One batched token query for the whole page.
+  const ids = rows.map((p) => p.userId);
+  const tokenRows = ids.length
+    ? await prisma.deviceToken.findMany({ where: { userId: { in: ids } }, select: { userId: true } })
+    : [];
+  const pushable = new Set(tokenRows.map((t) => t.userId));
+  const items = rows
+    .filter((p) => isConnected(p.userId) || pushable.has(p.userId))
+    .map((p) => publicTutor(p, p.user));
   res.json({ items, count: items.length });
 });
 
@@ -143,6 +152,10 @@ export const adminList = asyncHandler(async (req, res) => {
   const items = await Promise.all(
     rows.map(async (p) => ({
       ...p,
+      // isOnline = the tutor's toggle (intent); connectedNow = live socket.
+      // A tutor is CALLABLE only when both are true — same rule the learner
+      // list applies. Admin sees both so a stale toggle is visible.
+      connectedNow: isConnected(p.userId),
       earnings: await earningsSummary(p.userId),
     }))
   );

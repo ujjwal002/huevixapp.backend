@@ -5,6 +5,7 @@ import { createRoom } from './rooms.js';
 import { socketsForUser } from './presence.js';
 import { getBlockedUserIds } from '../services/safety.service.js';
 import { getTutorCallAccessById } from '../services/entitlement.service.js';
+import { pushToUser } from '../services/push.service.js';
 
 // =============================================================================
 // Paid tutor calls — a RING flow, unlike random matchmaking's instant pairing:
@@ -33,20 +34,39 @@ function clearInvite(inviteId) {
   return inv;
 }
 
-// A tutor is callable when: profile APPROVED + toggled online + actually
-// connected right now. Returns the profile row or null.
+// Does this user have at least one registered push device? Lets a toggled-on
+// tutor be rung by NOTIFICATION when their app is closed.
+async function hasPushDevice(userId) {
+  const n = await prisma.deviceToken.count({ where: { userId } }).catch(() => 0);
+  return n > 0;
+}
+
+// A tutor is callable when: profile APPROVED + toggled online + reachable —
+// either live on a socket (in-app ring) or via a push device (notification
+// ring that opens the app). Returns the profile row or null.
 async function callableTutor(tutorUserId) {
-  if (!socketsForUser(tutorUserId).length) return null;
   const p = await prisma.tutorProfile.findUnique({
     where: { userId: tutorUserId },
     include: { user: { select: { id: true, name: true } } },
   });
-  return p && p.status === 'APPROVED' && p.isOnline ? p : null;
+  if (!p || p.status !== 'APPROVED' || !p.isOnline) return null;
+  if (socketsForUser(tutorUserId).length) return p;
+  return (await hasPushDevice(tutorUserId)) ? p : null;
 }
 
 // Ring one tutor on all their devices; on timeout tell the learner.
+// If the tutor has NO live socket (app closed), we ring by push notification
+// instead and give them a longer window to open the app — on connect,
+// deliverPendingInvites() below re-delivers the invite so the incoming-call
+// sheet appears the moment the app is up.
 async function ring(io, learnerSocket, tutorProfile, type, excluded) {
   const inviteId = randomUUID();
+  const liveSockets = socketsForUser(tutorProfile.userId);
+  // Cold-starting an app takes time; a push ring needs a longer window.
+  const timeoutMs = liveSockets.length
+    ? config.tutorMarket.inviteTimeoutMs
+    : Math.max(config.tutorMarket.inviteTimeoutMs, 60_000);
+
   const timer = setTimeout(() => {
     const inv = clearInvite(inviteId);
     if (!inv) return;
@@ -55,7 +75,7 @@ async function ring(io, learnerSocket, tutorProfile, type, excluded) {
       reason: 'NO_ANSWER',
       message: 'The tutor did not answer. Try another tutor.',
     });
-  }, config.tutorMarket.inviteTimeoutMs);
+  }, timeoutMs);
   if (typeof timer.unref === 'function') timer.unref();
 
   invites.set(inviteId, {
@@ -66,18 +86,41 @@ async function ring(io, learnerSocket, tutorProfile, type, excluded) {
     excluded,
   });
 
-  for (const sid of socketsForUser(tutorProfile.userId)) {
+  for (const sid of liveSockets) {
     io.to(sid).emit('tutor_incoming', {
       inviteId,
       type,
       learner: { id: learnerSocket.data.userId, name: learnerSocket.data.name },
     });
   }
+  if (!liveSockets.length) {
+    // App closed -> wake the phone. Tapping opens the app; the socket
+    // connects; deliverPendingInvites shows the incoming-call sheet.
+    pushToUser(tutorProfile.userId, {
+      title: '📞 Incoming tutor call',
+      body: `${learnerSocket.data.name || 'A learner'} wants a lesson — open Huevix to answer`,
+      data: { type: 'tutor_call', inviteId },
+    }).catch(() => {});
+  }
   learnerSocket.emit('tutor_ringing', {
     inviteId,
     type,
     tutor: { id: tutorProfile.userId, name: tutorProfile.user?.name || 'Tutor' },
   });
+}
+
+// Called on every socket connection: if this user is a tutor with a live
+// invite that arrived while their app was closed (push ring), deliver it now.
+export function deliverPendingInvites(io, socket) {
+  for (const [inviteId, inv] of invites) {
+    if (inv.tutorUserId === socket.data.userId && inv.learnerSocket.connected) {
+      socket.emit('tutor_incoming', {
+        inviteId,
+        type: inv.type,
+        learner: { id: inv.learnerSocket.data.userId, name: inv.learnerSocket.data.name },
+      });
+    }
+  }
 }
 
 // Shared pre-flight for both entry points: learner must have prepaid balance

@@ -4,7 +4,7 @@ import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 import { addPresence, removePresence, onlineCount } from './presence.js';
 import { registerMatchmaking, leaveQueue } from './matchmaking.js';
-import { registerTutorCalls, cleanupTutorInvites } from './tutorCalls.js';
+import { registerTutorCalls, cleanupTutorInvites, deliverPendingInvites } from './tutorCalls.js';
 import { registerSignaling } from './signaling.js';
 import { handleDisconnect, startBillingWatchdog } from './rooms.js';
 
@@ -76,6 +76,7 @@ export function initRealtime(httpServer) {
     registerMatchmaking(io, socket);
     registerSignaling(io, socket);
     registerTutorCalls(io, socket);
+    deliverPendingInvites(io, socket);
 
     // Lobby helper: how many people are currently online (rough availability).
     socket.on('online_count', () => socket.emit('online_count', { count: onlineCount() }));
