@@ -41,13 +41,37 @@ async function sendToTokens(tokens, { title, body, data }) {
 
 // Broadcast to every registered device. Matches the app's GLOBAL notifications
 // (new card / promo) — one row, everyone gets pinged.
+//
+// Paginated so memory stays flat no matter how many devices are registered: we
+// page through deviceToken by primary key and send each page as we go, instead
+// of loading the entire token table into memory at once. CURSOR (not offset)
+// pagination is deliberate — sendToTokens asynchronously deletes dead
+// (DeviceNotRegistered) tokens, and a cursor keyed on the last id we saw can't
+// skip rows when earlier rows disappear mid-run. Each page is sent via the same
+// sendToTokens worker, whose per-chunk try/catch keeps one failing batch from
+// aborting the rest.
+const BROADCAST_PAGE_SIZE = 1000;
+
 export async function pushToAll({ title, body, data }) {
   try {
-    const rows = await prisma.deviceToken.findMany({ select: { token: true } });
-    await sendToTokens(
-      rows.map((r) => r.token),
-      { title, body, data }
-    );
+    let cursor = null;
+    for (;;) {
+      const rows = await prisma.deviceToken.findMany({
+        select: { id: true, token: true },
+        orderBy: { id: 'asc' },
+        take: BROADCAST_PAGE_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (rows.length === 0) break;
+
+      await sendToTokens(
+        rows.map((r) => r.token),
+        { title, body, data }
+      );
+
+      cursor = rows[rows.length - 1].id;
+      if (rows.length < BROADCAST_PAGE_SIZE) break; // last (partial) page
+    }
   } catch (err) {
     console.error('[push] pushToAll failed', err.message);
   }

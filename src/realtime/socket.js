@@ -8,6 +8,8 @@ import { registerTutorCalls, cleanupTutorInvites, deliverPendingInvites } from '
 import { registerSignaling } from './signaling.js';
 import { handleDisconnect, startBillingWatchdog } from './rooms.js';
 
+import { getPubSub, redisEnabled } from '../db/redis.js';
+
 let io = null;
 
 export function getIo() {
@@ -30,6 +32,23 @@ export function initRealtime(httpServer) {
       credentials: true,
     },
   });
+
+  // Multi-instance mode: attach the Redis adapter so socket emits/broadcasts
+  // (io.to(socketId).emit(), room broadcasts) reach clients connected to OTHER
+  // instances. With no REDIS_URL this is skipped and Socket.IO runs purely
+  // in-process — identical to the current single-instance behavior.
+  //
+  // NOTE: the adapter only fixes cross-instance MESSAGE DELIVERY. The realtime
+  // layer's shared STATE (matchmaking queue, presence, rooms, invites) is moved
+  // to Redis in later stages; until those land, do NOT run more than one
+  // instance — matchmaking would be split across processes.
+  if (redisEnabled()) {
+    const { pub, sub } = getPubSub();
+    io.adapter(createAdapter(pub, sub));
+    console.log('[rt] Socket.IO Redis adapter attached (multi-instance delivery)');
+  } else {
+    console.log('[rt] single-instance mode (no REDIS_URL); realtime state is in-process');
+  }
 
   io.use(async (socket, next) => {
     try {

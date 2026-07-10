@@ -2,6 +2,8 @@ import { createRoom } from './rooms.js';
 import { getBlockedUserIds } from '../services/safety.service.js';
 import { getCallAccessById } from '../services/entitlement.service.js';
 
+import { isDraining } from './lifecycle.js';
+
 // FIFO queue of sockets waiting for a partner. Entries are live socket objects
 // so we can check `.connected` and read `.data.userId` directly.
 //
@@ -24,6 +26,15 @@ export function queueLength() {
 
 export function registerMatchmaking(io, socket) {
   socket.on('find_partner', async (payload = {}) => {
+    // Ignore a duplicate tap from a socket already in the queue.
+
+    if (isDraining()) {
+      socket.emit('call_denied', {
+        reason: 'SERVER_DRAINING',
+        message: 'The server is updating. Please try again in a moment.',
+      });
+      return;
+    }
     // Ignore a duplicate tap from a socket already in the queue.
     if (waiting.some((s) => s.id === socket.id)) return;
 

@@ -7,6 +7,8 @@ import { getBlockedUserIds } from '../services/safety.service.js';
 import { getTutorCallAccessById } from '../services/entitlement.service.js';
 import { pushToUser } from '../services/push.service.js';
 
+import { isDraining } from './lifecycle.js';
+
 // =============================================================================
 // Paid tutor calls — a RING flow, unlike random matchmaking's instant pairing:
 // the tutor must ACCEPT before a room is created (tutors are people at work,
@@ -100,7 +102,7 @@ async function ring(io, learnerSocket, tutorProfile, type, excluded) {
       title: '📞 Incoming tutor call',
       body: `${learnerSocket.data.name || 'A learner'} wants a lesson — open Huevix to answer`,
       data: { type: 'tutor_call', inviteId },
-    }).catch(() => {});
+    }).catch(() => { });
   }
   learnerSocket.emit('tutor_ringing', {
     inviteId,
@@ -126,6 +128,13 @@ export function deliverPendingInvites(io, socket) {
 // Shared pre-flight for both entry points: learner must have prepaid balance
 // (tutor calls never use free minutes) and must not already be ringing someone.
 async function preflight(socket, type) {
+  if (isDraining()) {
+    socket.emit('call_denied', {
+      reason: 'SERVER_DRAINING',
+      message: 'The server is updating. Please try again in a moment.',
+    });
+    return { ok: false, reason: 'SERVER_DRAINING' };
+  }
   for (const inv of invites.values()) {
     if (inv.learnerSocket.id === socket.id) return { ok: false, reason: 'ALREADY_RINGING' };
   }
@@ -208,6 +217,17 @@ export function registerTutorCalls(io, socket) {
     // Only the invited tutor may accept, and only while the invite is live.
     if (!inv || inv.tutorUserId !== socket.data.userId) return;
     clearInvite(payload.inviteId);
+
+    // Server is draining: don't spin up a new room; release both sides cleanly.
+    if (isDraining()) {
+      socket.emit('tutor_unavailable', { reason: 'SERVER_DRAINING' });
+      inv.learnerSocket.emit('call_denied', {
+        reason: 'SERVER_DRAINING',
+        message: 'The server is updating. Please try again in a moment.',
+      });
+      return;
+    }
+
 
     if (!inv.learnerSocket.connected) {
       return socket.emit('tutor_unavailable', { reason: 'LEARNER_LEFT' });

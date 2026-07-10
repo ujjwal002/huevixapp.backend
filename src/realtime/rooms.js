@@ -137,6 +137,23 @@ export function activeCallCount() {
   return rooms.size;
 }
 
+// Graceful-shutdown helper: tell both participants of every live call that it's
+// ending, then finalize each room. endRoom bills the elapsed talk time exactly
+// ONCE — its atomic room-removal (get-then-delete with no await between) means a
+// concurrent disconnect firing the same path can't double-charge. Returns how
+// many rooms were ended.
+export async function drainAllRooms(io, { reason = 'server_restart' } = {}) {
+  const ids = [...rooms.keys()];
+  for (const roomId of ids) {
+    const room = rooms.get(roomId);
+    if (!room) continue;
+    io.to(room.callerSocketId).emit('peer_left', { roomId, reason });
+    io.to(room.calleeSocketId).emit('peer_left', { roomId, reason });
+  }
+  await Promise.all(ids.map((roomId) => endRoom(roomId, { status: 'ENDED' }).catch(() => {})));
+  return ids.length;
+}
+
 // ===========================================================================
 // Billing watchdog — LIVE balance enforcement.
 //

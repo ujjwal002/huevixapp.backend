@@ -232,6 +232,10 @@ export const config = {
     rechargePacks: { mins_30: 1800, mins_60: 3600, mins_120: 7200 },
   },
 
+  redis: {
+    url: process.env.REDIS_URL || null,
+  },
+
   // Minor fix: default CORS origin now matches the Vite dev frontend (5173)
   // referenced elsewhere in the app, plus the old 3000 default.
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000')
