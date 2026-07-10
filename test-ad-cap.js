@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 const BASE = process.env.TEST_BASE || 'http://localhost:4000/api/v1';
-const EMAIL = 'learner@lingoshorts.app';
+const EMAIL = 'learner@huevix.app';
 const PASSWORD = 'Password123';
 
 const claim = (token) =>

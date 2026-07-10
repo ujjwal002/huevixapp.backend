@@ -1,4 +1,4 @@
-# LingoShorts — Backend (v1)
+# Huevix — Backend (v1)
 
 An Inshorts-style daily language-learning API. Each card is a short text the
 learner can **read**, **listen** to, and **speak** — with vocab meanings in their
@@ -49,8 +49,8 @@ npm run seed                # admin + learner + a sample English card
 npm run dev                 # http://localhost:4000/api/v1
 ```
 
-Seeded logins (password `Password123`): `admin@lingoshorts.app`,
-`learner@lingoshorts.app`.
+Seeded logins (password `Password123`): `admin@huevix.app`,
+`learner@huevix.app`.
 
 > No PostgreSQL handy? The fastest path is a free hosted Postgres (Neon/Supabase/
 > Railway) — paste its connection string into `DATABASE_URL`.

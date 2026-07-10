@@ -9,7 +9,7 @@ Pricing is **not** wired in yet (recharge/credit model comes later — see the l
 ## What's in this package
 
 ```
-backend/    → drop into your LingoShorts (Node/Express) repo
+backend/    → drop into your Huevix (Node/Express) repo
 frontend/   → drop into your Huevix (Expo) repo
 ```
 
@@ -28,7 +28,7 @@ frontend/   → drop into your Huevix (Expo) repo
 ## 1. Backend setup
 
 ```bash
-cd <lingoshorts repo>
+cd <Huevix repo>
 
 # 1. dependency
 npm install socket.io

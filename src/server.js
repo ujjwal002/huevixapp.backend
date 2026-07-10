@@ -16,7 +16,7 @@ const server = http.createServer(app);
 const io = initRealtime(server);
 
 server.listen(config.port, () => {
-  console.log(`LingoShorts API running on http://localhost:${config.port}${config.apiPrefix}`);
+  console.log(`Huevix API running on http://localhost:${config.port}${config.apiPrefix}`);
   console.log('Socket.IO realtime ready (practice calling)');
   console.log(`Mock external services: ${config.mockExternal}`);
 });

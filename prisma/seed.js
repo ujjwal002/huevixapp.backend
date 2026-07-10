@@ -10,7 +10,7 @@ async function main() {
   const passwordHash = await bcrypt.hash('Password123', rounds);
 
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@lingoshorts.app' },
+    where: { email: 'admin@huevix.app' },
     update: {},
     create: {
       email: 'admin@huevix.app',
@@ -62,8 +62,8 @@ async function main() {
   }
 
   console.log('Seed complete.');
-  console.log('Admin login:   admin@lingoshorts.app / Password123');
-  console.log('Learner login: learner@lingoshorts.app / Password123');
+  console.log('Admin login:   admin@huevix.app / Password123');
+  console.log('Learner login: learner@huevix.app / Password123');
 }
 
 main()

@@ -1,4 +1,4 @@
-// LingoShorts — Prisma schema
+// Huevix — Prisma schema
 // Design principle: LANGUAGE IS DATA, NOT CODE.
 // Every content/user row carries language fields, so adding a new language is a
 // config + content change, never a schema rewrite.
