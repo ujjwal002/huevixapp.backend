@@ -192,6 +192,9 @@ export const config = {
     // One-time consumable packs: productId -> SECONDS of call credit granted.
     // Play product id -> COINS granted. Legacy minute packs keep working and
     // grant their old value in coins (1 old second = 4 coins).
+
+    rtdnAudience: process.env.GOOGLE_RTDN_AUDIENCE || '',
+    rtdnServiceAccountEmail: process.env.GOOGLE_RTDN_SA_EMAIL || '',
     creditPacks: {
       [process.env.GOOGLE_PACK_30MIN_ID || 'call_credits_30min']: 30 * 60 * 4,
       [process.env.GOOGLE_PACK_60MIN_ID || 'call_credits_60min']: 60 * 60 * 4,

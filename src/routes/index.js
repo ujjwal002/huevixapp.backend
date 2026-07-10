@@ -23,10 +23,6 @@ import { prisma } from '../db/prisma.js';
 
 import { admobSsv } from '../controllers/admobSsv.controller.js';
 
-
-
-
-
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
 import { getAppSettings } from '../services/settings.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -79,6 +75,14 @@ router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/cards', cardRoutes);
 router.use('/speaking', speakingRouter);
+
+// IMPORTANT — ordering matters here. AdMob's server-side-verification (SSV)
+// callback is PUBLIC: AdMob's servers call it with no Authorization header. It
+// lives under /ads/*, so it MUST be registered BEFORE `router.use('/ads', adsRouter)`.
+// That mount is a PREFIX match whose requireAuth would otherwise capture this
+// path first and 401 every AdMob callback (silently killing rewarded-ad grants).
+// Do NOT move this line below the mount. Regression-guarded by tests/routeMounting.test.js.
+router.get('/ads/admob-ssv', admobSsv);
 router.use('/ads', adsRouter);
 router.use('/subscription', subRouter);
 router.use('/notifications', notificationRouter);
@@ -99,9 +103,6 @@ router.use('/calls', callsRoutes);
 router.use('/tutors', tutorRoutes);
 
 router.use('/quiz', quizRoutes);
-
-router.get('/ads/admob-ssv', admobSsv);
-
 
 // Google Play: one-time credit packs (authed)
 const purchasesRouter = Router();

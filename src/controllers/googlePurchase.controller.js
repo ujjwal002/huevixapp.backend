@@ -5,6 +5,9 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import * as gp from '../services/googlePlay.service.js';
 
+import { verifyPubSubPushToken } from '../services/pubsubAuth.service.js';
+
+
 // =============================================================================
 // Google Play purchase verification — the ONLY payment path since the Razorpay
 // migration. Three handlers:
@@ -221,8 +224,10 @@ export const verifyGoogleProduct = asyncHandler(async (req, res) => {
 // re-query Google for the authoritative state rather than trusting the
 // notification body.
 //
-// Auth: the secret in the URL must match GOOGLE_RTDN_SECRET. (For stronger
-// security, additionally verify the Pub/Sub OIDC token.)
+// Auth (two layers): (1) the secret in the URL must match GOOGLE_RTDN_SECRET;
+// (2) when GOOGLE_RTDN_AUDIENCE is set, the Pub/Sub push OIDC token is also
+// verified (see pubsubAuth.service.js) so a leaked URL secret alone is not
+// enough to forge a notification.
 //
 // Idempotency + crash-safety: the dedupe marker and all DB effects commit in
 // ONE transaction. A crash mid-processing rolls back the marker too, so
@@ -241,6 +246,32 @@ export const googleRtdn = asyncHandler(async (req, res) => {
   }
 
   // Pub/Sub push envelope: { message: { data (base64), messageId }, subscription }
+
+  // Defense in depth: additionally verify the Pub/Sub push OIDC token when an
+  // audience is configured. Google attaches a signed OIDC JWT (Authorization:
+  // Bearer ...) to each push from an AUTHENTICATED subscription; verifying it
+  // proves the request really came from Google's Pub/Sub, not from someone who
+  // learned the URL secret. Enforced only when GOOGLE_RTDN_AUDIENCE is set, so
+  // existing secret-only deployments keep working until authenticated push is
+  // configured. Skipped in mock mode.
+  if (!config.mockExternal && config.googlePlay.rtdnAudience) {
+    const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
+    if (!bearer) {
+      throw ApiError.unauthorized('Missing Pub/Sub OIDC token', 'RTDN_OIDC_MISSING');
+    }
+    let verdict;
+    try {
+      verdict = await verifyPubSubPushToken(bearer);
+    } catch (err) {
+      console.error(`[rtdn] OIDC verify unavailable: ${err.message}`);
+      // Couldn't verify (transient cert-fetch / timeout). 502 so Pub/Sub retries
+      // later rather than dropping the notification.
+      return res.status(502).json({ error: 'RTDN_OIDC_VERIFY_UNAVAILABLE' });
+    }
+    if (!verdict.ok) {
+      throw ApiError.unauthorized('Invalid Pub/Sub OIDC token', 'RTDN_OIDC_INVALID');
+    }
+  }
   const message = req.body?.message;
   if (!message?.data) return res.status(204).end(); // nothing to do; ack
 
