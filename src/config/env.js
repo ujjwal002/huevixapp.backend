@@ -227,7 +227,7 @@ export const config = {
 
   calls: {
     // Free daily allowance is AUDIO-ONLY (see entitlement.service.js). 2 minutes.
-    freeDailySeconds: int(process.env.FREE_DAILY_CALL_SECONDS, 120),
+    freeDailySeconds: int(process.env.FREE_DAILY_CALL_SECONDS, 1800),
     minStartSeconds: int(process.env.MIN_CALL_START_SECONDS, 20),
     rechargePacks: { mins_30: 1800, mins_60: 3600, mins_120: 7200 },
   },

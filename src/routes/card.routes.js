@@ -39,6 +39,8 @@ router.get('/:id', optionalAuth, validate(cardIdParam), card.getCard);
 
 // --- Account-only ---
 router.post('/:id/complete', requireAuth, validate(completeCardSchema), card.completeCard);
+router.post('/:id/seen', requireAuth, validate(cardIdParam), card.markCardSeen);
+
 router.post('/:id/save', requireAuth, validate(cardIdParam), card.saveCard);
 router.delete('/:id/save', requireAuth, validate(cardIdParam), card.unsaveCard);
 

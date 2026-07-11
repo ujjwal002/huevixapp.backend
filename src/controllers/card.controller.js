@@ -18,6 +18,24 @@ function countWords(text) {
 }
 
 // GET /cards/feed — the Inshorts-style daily feed for the user's target language.
+// Logged-in users see UNSEEN cards first, then SEEN ones as a fallback so the
+// feed is never empty (a card becomes "seen" via POST /cards/:id/seen). Guests
+// get plain newest-first with cursor pagination.
+const FEED_CARD_SELECT = {
+  id: true,
+  title: true,
+  body: true,
+  level: true,
+  topic: true,
+  targetLanguage: true,
+  audioUrl: true,
+  audioStatus: true,
+  wordCount: true,
+  imageUrl: true,
+  sourceUrl: true,
+  createdAt: true,
+};
+
 export const getFeed = asyncHandler(async (req, res) => {
   const { level, cursor, limit } = req.query;
   const where = {
@@ -26,62 +44,65 @@ export const getFeed = asyncHandler(async (req, res) => {
     ...(level ? { level } : {}),
   };
 
-  const cards = await prisma.card.findMany({
+  // --- Guests: simple newest-first cursor pagination (unchanged behavior). ---
+  if (!req.user) {
+    const cards = await prisma.card.findMany({
+      where,
+      // Cursor pagination needs a stable, unique ordering; `id` breaks ties when
+      // two cards share a createdAt (batch-seeded / same-ms AI generation).
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: FEED_CARD_SELECT,
+    });
+    let nextCursor = null;
+    if (cards.length > limit) nextCursor = cards.pop().id;
+    return res.json({
+      items: cards.map((c) => ({ ...c, progress: null, saved: false })),
+      nextCursor,
+    });
+  }
+
+  // --- Logged-in: UNSEEN first, then SEEN as fallback. The app loads the feed
+  // as one batch (it doesn't page the cursor), so we reorder in memory over a
+  // bounded pool of recent cards rather than trying to express a per-user,
+  // shifting order as a cursor (which pagination can't do cleanly). ---
+  const POOL_SIZE = Math.min(100, limit * 5);
+  const pool = await prisma.card.findMany({
     where,
-    // Fix #10: cursor pagination needs a stable, unique ordering. Adding `id`
-    // as a tiebreaker prevents skipped/duplicated cards when two share a
-    // createdAt (e.g. batch-seeded or AI-generated in the same millisecond).
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    select: {
-      id: true,
-      title: true,
-      body: true,
-      level: true,
-      topic: true,
-      targetLanguage: true,
-      audioUrl: true,
-      audioStatus: true,
-      wordCount: true,
-      imageUrl: true,
-      sourceUrl: true,
-      createdAt: true,
-    },
+    take: POOL_SIZE,
+    select: FEED_CARD_SELECT,
   });
 
-  let nextCursor = null;
-  if (cards.length > limit) {
-    const next = cards.pop();
-    nextCursor = next.id;
-  }
+  const poolIds = pool.map((c) => c.id);
+  const [seenRows, savedRows] = await Promise.all([
+    prisma.cardCompletion.findMany({
+      where: { userId: req.user.id, cardId: { in: poolIds } },
+      select: { cardId: true, readDone: true, listenDone: true },
+    }),
+    prisma.savedCard.findMany({
+      where: { userId: req.user.id, cardId: { in: poolIds } },
+      select: { cardId: true },
+    }),
+  ]);
+  const seenMap = new Map(seenRows.map((r) => [r.cardId, r]));
+  const savedSet = new Set(savedRows.map((s) => s.cardId));
 
-  // For logged-in users, attach completed + saved status. Guests skip this.
-  let doneMap = new Map();
-  let savedSet = new Set();
-  if (req.user) {
-    const ids = cards.map((c) => c.id);
-    const [done, saved] = await Promise.all([
-      prisma.cardCompletion.findMany({
-        where: { userId: req.user.id, cardId: { in: ids } },
-        select: { cardId: true, readDone: true, listenDone: true },
-      }),
-      prisma.savedCard.findMany({
-        where: { userId: req.user.id, cardId: { in: ids } },
-        select: { cardId: true },
-      }),
-    ]);
-    doneMap = new Map(done.map((d) => [d.cardId, d]));
-    savedSet = new Set(saved.map((s) => s.cardId));
-  }
+  // Split, preserving newest→oldest order within each group.
+  const unseen = [];
+  const seen = [];
+  for (const c of pool) (seenMap.has(c.id) ? seen : unseen).push(c);
+  const ordered = [...unseen, ...seen].slice(0, limit);
 
   res.json({
-    items: cards.map((c) => ({
+    items: ordered.map((c) => ({
       ...c,
-      progress: doneMap.get(c.id) || null,
+      progress: seenMap.get(c.id) || null,
       saved: savedSet.has(c.id),
     })),
-    nextCursor,
+    // Reordered feed is a single bounded batch, not a cursor stream.
+    nextCursor: null,
   });
 });
 
@@ -138,6 +159,27 @@ export const completeCard = asyncHandler(async (req, res) => {
 
   const streak = await touchStreak(req.user.id);
   res.json({ success: true, streak });
+});
+
+
+// POST /cards/:id/seen — record that the user has VIEWED this card (they dwelled
+// on it long enough in the feed). Deliberately separate from /complete: it does
+// NOT bump the streak, because passive viewing shouldn't earn a streak. Its only
+// job is to feed the "unseen first, then seen" ordering in getFeed. Idempotent.
+export const markCardSeen = asyncHandler(async (req, res) => {
+  const card = await prisma.card.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, isPublished: true },
+  });
+  if (!card || !card.isPublished) throw ApiError.notFound('Card not found');
+
+  await prisma.cardCompletion.upsert({
+    where: { userId_cardId: { userId: req.user.id, cardId: card.id } },
+    create: { userId: req.user.id, cardId: card.id, readDone: true },
+    update: {},
+  });
+
+  res.json({ success: true });
 });
 
 // ----------------------------- Admin -------------------------------------
