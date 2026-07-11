@@ -16,6 +16,19 @@ import { withTimeout } from '../utils/withTimeout.js';
 
 const TOTAL = 20;
 
+// Generating 20 structured questions is a HEAVY generation and legitimately
+// takes longer than a normal API call. This runs in a background cron (or a
+// lazy first-open), so a generous timeout is fine — the 25s global default was
+// firing mid-generation and silently falling back to the static mock every day.
+const QUIZ_GEN_TIMEOUT_MS = 90_000;
+
+// gpt-4o-mini often returns a couple fewer than asked, so we request a BUFFER
+// (see PROMPT) and accept any batch with at least MIN_ACCEPTABLE valid
+// questions instead of demanding exactly TOTAL. Falling back to the static mock
+// only when we truly can't get enough was the bug that froze the daily quiz.
+const REQUEST_COUNT = 24; // ask for extra so >= 20 reliably survive validation
+const MIN_ACCEPTABLE = 15; // serve real questions if we got at least this many
+
 function mockQuestions() {
   // 20 general-knowledge questions with clear, unambiguous answers.
   return [
@@ -43,15 +56,18 @@ function mockQuestions() {
 }
 
 // Strictly validate model output. Returns a clean array or null.
+// Validate model output. Returns a cleaned array of the VALID questions (bad
+// ones are dropped, not fatal), or null only if too few survived to be worth
+// serving. Caller trims to the final count.
 function validate(items) {
-  if (!Array.isArray(items) || items.length < TOTAL) return null;
+  if (!Array.isArray(items)) return null;
   const cleaned = [];
-  for (const q of items.slice(0, TOTAL)) {
-    if (!q || typeof q.prompt !== 'string' || !q.prompt.trim()) return null;
-    if (!Array.isArray(q.options) || q.options.length !== 4) return null;
-    if (!q.options.every((o) => typeof o === 'string' && o.trim())) return null;
+  for (const q of items) {
+    if (!q || typeof q.prompt !== 'string' || !q.prompt.trim()) continue;
+    if (!Array.isArray(q.options) || q.options.length !== 4) continue;
+    if (!q.options.every((o) => typeof o === 'string' && o.trim())) continue;
     const ci = Number(q.correctIndex);
-    if (!Number.isInteger(ci) || ci < 0 || ci > 3) return null;
+    if (!Number.isInteger(ci) || ci < 0 || ci > 3) continue;
     cleaned.push({
       prompt: q.prompt.trim(),
       options: q.options.map((o) => String(o).trim()),
@@ -59,11 +75,11 @@ function validate(items) {
       explanation: typeof q.explanation === 'string' ? q.explanation.trim() : null,
     });
   }
-  return cleaned;
+  return cleaned.length >= MIN_ACCEPTABLE ? cleaned : null;
 }
 
 // EDIT THIS to change the quiz subject.
-const PROMPT = `Generate ${TOTAL} multiple-choice quiz questions for a daily general-knowledge quiz app.
+const PROMPT = `Generate ${REQUEST_COUNT} multiple-choice quiz questions for a daily general-knowledge quiz app.
 Mix general knowledge, basic science, simple math/reasoning, geography, and history. Easy to medium difficulty.
 Each question must have EXACTLY 4 options and exactly one correct answer.
 
@@ -79,18 +95,18 @@ export async function generateQuizQuestions(_opts = {}) {
   if (config.mockExternal || !config.ai.apiKey) return mockQuestions();
   try {
     const { default: OpenAI } = await import('openai');
-    const client = new OpenAI({ apiKey: config.ai.apiKey, timeout: config.externalTimeoutMs, maxRetries: 2 });
+    const client = new OpenAI({ apiKey: config.ai.apiKey, timeout: QUIZ_GEN_TIMEOUT_MS, maxRetries: 2 });
     const completion = await withTimeout(
       client.chat.completions.create({
         model: config.ai.model,
-        max_tokens: 3500,
+        max_tokens: 4096,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: 'You write quiz questions. Reply with strict JSON only, no markdown.' },
           { role: 'user', content: PROMPT },
         ],
       }),
-      { label: 'quiz generation' }
+      { label: 'quiz generation', ms: QUIZ_GEN_TIMEOUT_MS }
     );
     const txt = completion.choices?.[0]?.message?.content || '{}';
     let parsed;
