@@ -234,11 +234,11 @@ export async function ensureDailyCallSeconds(user) {
   if (!isSameUtcDay(user.callSecondsDate, today)) {
     await resetIfNewDay(user.id, {
       dateField: 'callSecondsDate',
-      zeroFields: ['callSecondsUsedToday', 'adCallGrantsToday'],
+      zeroFields: ['callSecondsUsedToday', 'adCallGrantsToday', 'adVideoSecondsRemaining'],
     });
     const fresh = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { callSecondsUsedToday: true, callSecondsDate: true },
+      select: { callSecondsUsedToday: true, callSecondsDate: true, adVideoSecondsRemaining: true },
     });
     if (fresh) Object.assign(user, fresh);
   }
@@ -249,6 +249,7 @@ function callSummaryFrom(user) {
   const freeDaily = config.calls.freeDailySeconds; // AUDIO-only free allowance (seconds)
   const usedToday = user.callSecondsUsedToday ?? 0;
   const coins = user.coinBalance ?? 0;
+  const adVideo = user.adVideoSecondsRemaining ?? 0; // video seconds earned via ads
   const perSecNormal = config.coins.normalPerSec;
   const perSecTutor = config.coins.tutorPerSec;
   const freeLeft = Math.max(0, freeDaily - usedToday);
@@ -259,9 +260,10 @@ function callSummaryFrom(user) {
   const balanceSecondsFromCoins = Math.floor(coins / perSecNormal);
   const tutorSecondsFromCoins = Math.floor(coins / perSecTutor);
 
-  // Free time applies to AUDIO only. VIDEO (and everything tutor) is coins-only.
+  // Free time applies to AUDIO only (random). VIDEO (random) is unlocked by
+  // watching rewarded ads (adVideo seconds) OR by coins. Tutor is coins-only.
   const audioLeft = freeLeft + balanceSecondsFromCoins;
-  const videoLeft = balanceSecondsFromCoins;
+  const videoLeft = adVideo + balanceSecondsFromCoins;
 
   return {
     // --- coin economy (new apps read these) ---
@@ -270,6 +272,8 @@ function callSummaryFrom(user) {
     coinsPerSecTutor: perSecTutor,
     tutorSecondsLeft: tutorSecondsFromCoins,
     canStartTutor: coins >= perSecTutor * minStart,
+    // --- ad-granted video ---
+    adVideoSecondsLeft: adVideo,
     // --- legacy seconds view (old apps keep working) ---
     freeDailySeconds: freeDaily,
     freeSecondsLeft: freeLeft, // audio-only free time left today
@@ -300,7 +304,7 @@ export async function getCallAccess(user, type = 'AUDIO') {
     reason: type === 'VIDEO' ? 'NO_VIDEO_BALANCE' : 'NO_CALL_BALANCE',
     message:
       type === 'VIDEO'
-        ? 'Video calls need call credits. Recharge to start a video call.'
+        ? 'Watch a short ad to get 2 minutes of video, or use coins.'
         : 'You are out of free minutes. Recharge to keep practising.',
     ...summary,
   };
@@ -315,6 +319,7 @@ export async function getCallAccessById(userId, type = 'AUDIO') {
       coinBalance: true,
       callSecondsUsedToday: true,
       callSecondsDate: true,
+      adVideoSecondsRemaining: true,
     },
   });
   if (!user) return { allowed: false, reason: 'USER_NOT_FOUND', message: 'User not found' };
@@ -336,15 +341,33 @@ export async function consumeCallSeconds(userId, seconds, type = 'AUDIO') {
       coinBalance: true,
       callSecondsUsedToday: true,
       callSecondsDate: true,
+      adVideoSecondsRemaining: true,
     },
   });
   if (!user) return;
   await ensureDailyCallSeconds(user);
 
+  if (type === 'VIDEO') {
+    // Random VIDEO: spend ad-granted seconds first, then coins for the rest.
+    // (Audio's free daily allowance never applies to video.)
+    const adLeft = Math.max(0, user.adVideoSecondsRemaining ?? 0);
+    const fromAd = Math.min(secs, adLeft);
+    const paidSecs = secs - fromAd;
+    if (fromAd > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { adVideoSecondsRemaining: { decrement: fromAd } },
+      });
+    }
+    if (paidSecs > 0) {
+      await spendCoins(userId, paidSecs * config.coins.normalPerSec);
+    }
+    return;
+  }
+
   const freeDaily = config.calls.freeDailySeconds;
-  // Free daily seconds are AUDIO-only; VIDEO is always paid in coins.
-  const freeLeft =
-    type === 'VIDEO' ? 0 : Math.max(0, freeDaily - (user.callSecondsUsedToday ?? 0));
+  // Free daily seconds are AUDIO-only.
+  const freeLeft = Math.max(0, freeDaily - (user.callSecondsUsedToday ?? 0));
   const fromFree = Math.min(secs, freeLeft);
   const paidSecs = secs - fromFree;
 
@@ -429,11 +452,10 @@ export async function getTutorCallAccessById(userId) {
   };
 }
 
-// Rewarded-ad grant: N seconds of FREE normal-call time (audio-only). Stored
-// by DECREMENTING callSecondsUsedToday (may go negative), which the free-left
-// math (freeDaily - usedToday) naturally turns into extra free time. Expires
-// at the UTC midnight reset; can never be spent on tutor calls or converted
-// to coins. Daily-capped; the conditional update makes the cap race-safe.
+// Rewarded-ad grant: N seconds of random VIDEO time, stored in the dedicated
+// adVideoSecondsRemaining bucket. Expires at the UTC midnight reset; can never
+// be spent on tutor calls or converted to coins, and does NOT affect the free
+// audio allowance. Daily-capped; the conditional update makes the cap race-safe.
 export async function grantAdCallSeconds(userId) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -444,15 +466,17 @@ export async function grantAdCallSeconds(userId) {
 
   const max = config.entitlement.maxAdCallGrantsPerDay;
   const secs = config.entitlement.adRewardCallSeconds;
+  // Watching a rewarded ad grants VIDEO seconds (random video calls), up to
+  // maxAdCallGrantsPerDay ads/day. Audio is already free daily; tutor is coins.
   const r = await prisma.user.updateMany({
     where: { id: userId, adCallGrantsToday: { lt: max } },
     data: {
-      callSecondsUsedToday: { decrement: secs },
+      adVideoSecondsRemaining: { increment: secs },
       adCallGrantsToday: { increment: 1 },
     },
   });
   if (r.count === 0) return { granted: false, reason: 'DAILY_AD_LIMIT' };
-  return { granted: true, seconds: secs };
+  return { granted: true, seconds: secs, appliesTo: 'VIDEO' };
 }
 
 // Live-billing watchdog support: how many MORE seconds can this user afford
@@ -461,7 +485,7 @@ export async function grantAdCallSeconds(userId) {
 export async function remainingCallSeconds(userId, { kind = 'RANDOM', type = 'AUDIO' } = {}) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { coinBalance: true, callSecondsUsedToday: true, callSecondsDate: true },
+    select: { coinBalance: true, callSecondsUsedToday: true, callSecondsDate: true, adVideoSecondsRemaining: true },
   });
   if (!user) return 0;
 
@@ -470,11 +494,13 @@ export async function remainingCallSeconds(userId, { kind = 'RANDOM', type = 'AU
     return Math.floor(coins / config.coins.tutorPerSec);
   }
   await ensureDailyCallSeconds(user);
-  const freeLeft =
-    type === 'VIDEO'
-      ? 0
-      : Math.max(0, config.calls.freeDailySeconds - (user.callSecondsUsedToday ?? 0));
-  return freeLeft + Math.floor(coins / config.coins.normalPerSec);
+  const coinSeconds = Math.floor(coins / config.coins.normalPerSec);
+  if (type === 'VIDEO') {
+    // Random video: ad-granted seconds + coin-equivalent seconds (no free audio).
+    return Math.max(0, user.adVideoSecondsRemaining ?? 0) + coinSeconds;
+  }
+  const freeLeft = Math.max(0, config.calls.freeDailySeconds - (user.callSecondsUsedToday ?? 0));
+  return freeLeft + coinSeconds;
 }
 
 // Tutor-call billing: every second costs coins.tutorPerSec (3x normal).

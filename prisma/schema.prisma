@@ -114,6 +114,13 @@ model User {
   adCallGrantsToday  Int @default(0)
   callSecondsUsedToday Int       @default(0)
   callSecondsDate      DateTime? @db.Date
+  // Video time earned by watching rewarded ads (random VIDEO calls only). Audio
+  // is free via freeDailySeconds; tutor is coins-only. Granted by watching an ad
+  // (see grantAdCallSeconds), spent by video calls before coins, reset daily
+  // alongside callSecondsUsedToday.
+  adVideoSecondsRemaining Int @default(0)
+
+  
 
   vocabTutorSessions VocabTutorSession[]
 

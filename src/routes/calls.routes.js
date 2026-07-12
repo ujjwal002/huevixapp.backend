@@ -16,4 +16,6 @@ router.get('/blocks', calls.listBlocks);
 router.get('/balance', calls.getCallBalance);
 router.post('/recharge', calls.rechargeCall);
 
+router.post('/grant-ad-video', calls.grantAdVideo);
+
 export default router;

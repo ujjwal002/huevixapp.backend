@@ -4,7 +4,7 @@ import { prisma } from '../db/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 
-import { getCallCreditSummary, addCallSeconds } from '../services/entitlement.service.js';
+import { getCallCreditSummary, addCallSeconds, grantAdCallSeconds } from '../services/entitlement.service.js';
 
 import {
   createReport,
@@ -124,6 +124,22 @@ export const listBlocks = asyncHandler(async (req, res) => {
 // append these two handlers:
 export const getCallBalance = asyncHandler(async (req, res) => {
   res.json(await getCallCreditSummary(req.user));
+});
+
+// Client-confirmed rewarded-ad grant for VIDEO minutes. Called by the app when
+// it receives EARNED_REWARD, as a reliable complement to AdMob SSV (test ads
+// never send SSV, and real SSV can be delayed). Grants the same 2 min of video
+// as SSV, capped at maxAdCallGrantsPerDay/day by grantAdCallSeconds itself — so
+// this can't be abused for more than the daily cap even though it's client-
+// asserted. Deliberately limited to VIDEO minutes (free, capped), never coins.
+// Idempotency/cap live in grantAdCallSeconds; the SSV path shares the same
+// adCallGrantsToday counter, so SSV + client-confirm can't double-grant beyond
+// the cap.
+export const grantAdVideo = asyncHandler(async (req, res) => {
+  const result = await grantAdCallSeconds(req.user.id);
+  // Return the fresh balance so the app can immediately react (start the call).
+  const balance = await getCallCreditSummary(req.user);
+  res.json({ ...result, balance });
 });
 
 export const rechargeCall = asyncHandler(async (req, res) => {
