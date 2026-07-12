@@ -9,7 +9,7 @@ const expo = new Expo(
 
 // Send a notification to a set of Expo push tokens. Invalid/dead tokens are
 // dropped from the database so the list stays clean over time.
-async function sendToTokens(tokens, { title, body, data }) {
+async function sendToTokens(tokens, { title, body, data, image }) {
   const valid = [...new Set(tokens)].filter((t) => Expo.isExpoPushToken(t));
   if (!valid.length) return;
 
@@ -21,6 +21,10 @@ async function sendToTokens(tokens, { title, body, data }) {
     data: data || {},
     channelId: 'default', // must match the Android channel the app creates
     priority: 'high',
+    // Rich (big-picture) notification image when provided. Expo maps richContent
+    // to a large image on Android; also mirrored into data so the app can render
+    // it in the foreground / notifications feed.
+    ...(image ? { richContent: { image }, data: { ...(data || {}), image } } : {}),
   }));
 
   const chunks = expo.chunkPushNotifications(messages);
@@ -52,7 +56,7 @@ async function sendToTokens(tokens, { title, body, data }) {
 // aborting the rest.
 const BROADCAST_PAGE_SIZE = 1000;
 
-export async function pushToAll({ title, body, data }) {
+export async function pushToAll({ title, body, data, image }) {
   try {
     let cursor = null;
     for (;;) {
@@ -66,7 +70,7 @@ export async function pushToAll({ title, body, data }) {
 
       await sendToTokens(
         rows.map((r) => r.token),
-        { title, body, data }
+        { title, body, data, image }
       );
 
       cursor = rows[rows.length - 1].id;

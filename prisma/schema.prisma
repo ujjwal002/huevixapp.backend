@@ -132,6 +132,12 @@ model User {
   tutorEarnings TutorEarning[]
   tutorPayouts  TutorPayout[]
 
+  vocabCurrentStreak Int       @default(0)
+  vocabLongestStreak Int       @default(0)
+  vocabLastPlayedDate DateTime? @db.Date
+  vocabPlays         VocabDailyPlay[]
+  vocabAnswers       VocabSetAnswer[]
+
   blocksMade      Block[]  @relation("BlocksMade")
   blocksReceived  Block[]  @relation("BlocksReceived")
   reportsMade     Report[] @relation("ReportsMade")
@@ -751,4 +757,75 @@ model TutorPayout {
   tutor User @relation(fields: [tutorUserId], references: [id], onDelete: Cascade)
 
   @@index([tutorUserId, createdAt])
+}
+
+// ===========================================================================
+// Daily Vocab Quiz — a separate module from the daily general-knowledge quiz
+// and from the existing VocabWord/VocabProgress system. 10 AI-generated words
+// per day (learn phase) + one fill-in-the-blank question per word (practice).
+// ===========================================================================
+
+model DailyVocabSet {
+  id             String   @id @default(uuid())
+  date           DateTime
+  targetLanguage String   @default("en")
+  status         String   @default("READY")
+  createdAt      DateTime @default(now())
+
+  words     VocabSetWord[]
+  plays     VocabDailyPlay[]
+
+  @@unique([date, targetLanguage])
+  @@index([date])
+}
+
+model VocabSetWord {
+  id           String  @id @default(uuid())
+  setId        String
+  order        Int
+  word         String
+  partOfSpeech String?
+  meaning      String
+  example      String
+
+  // The fill-in-the-blank practice question for this word.
+  questionSentence String   // sentence with "___" where the word goes
+  options          Json     // 4 options (one is the word)
+  correctIndex     Int
+
+  set     DailyVocabSet    @relation(fields: [setId], references: [id], onDelete: Cascade)
+  answers VocabSetAnswer[]
+
+  @@unique([setId, order])
+  @@index([setId])
+}
+
+model VocabSetAnswer {
+  id         String   @id @default(cuid())
+  userId     String
+  wordId     String
+  chosenIndex Int
+  correct    Boolean
+  answeredAt DateTime @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word VocabSetWord @relation(fields: [wordId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, wordId])
+  @@index([userId, answeredAt])
+}
+
+model VocabDailyPlay {
+  id        String   @id @default(cuid())
+  userId    String
+  setId     String
+  correctCount Int    @default(0)
+  completedAt  DateTime?
+  createdAt DateTime @default(now())
+
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  set  DailyVocabSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, setId])
+  @@index([userId])
 }

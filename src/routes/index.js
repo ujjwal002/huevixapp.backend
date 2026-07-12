@@ -16,6 +16,8 @@ import callsRoutes from './calls.routes.js';
 
 import tutorRoutes from './tutor.routes.js';
 
+import dailyVocabRoutes from './dailyVocab.routes.js';
+
 import * as gpurchase from '../controllers/googlePurchase.controller.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -88,6 +90,7 @@ router.use('/subscription', subRouter);
 router.use('/notifications', notificationRouter);
 
 router.use('/vocab', vocabRoutes);
+router.use('/daily-vocab', dailyVocabRoutes);
 router.use('/grammar', grammarRoutes);
 
 router.use('/sponsored', sponsoredRoutes);
