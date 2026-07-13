@@ -142,10 +142,14 @@ Return STRICT JSON only, no markdown:
 export async function generateDailyVocab({ avoidWords = [] } = {}) {
   if (config.mockExternal || !config.ai.apiKey) return mockVocab();
   try {
-    const { default: OpenAI } = await import('openai');
+   const { default: OpenAI } = await import('openai');
+    // Vocab generation returns a lot (10 words + meanings + examples + questions),
+    // so it needs a longer timeout than the global default — same lesson as the
+    // daily quiz generator.
+    const VOCAB_GEN_TIMEOUT_MS = Number(process.env.VOCAB_GEN_TIMEOUT_MS) || 90000;
     const client = new OpenAI({
       apiKey: config.ai.apiKey,
-      timeout: config.externalTimeoutMs,
+      timeout: VOCAB_GEN_TIMEOUT_MS,
       maxRetries: 2,
     });
     const completion = await withTimeout(
@@ -158,7 +162,7 @@ export async function generateDailyVocab({ avoidWords = [] } = {}) {
           { role: 'user', content: buildPrompt(avoidWords) },
         ],
       }),
-      { label: 'vocab generation' }
+      { label: 'vocab generation', ms: VOCAB_GEN_TIMEOUT_MS }
     );
     const txt = completion.choices?.[0]?.message?.content || '{}';
     let parsed;
