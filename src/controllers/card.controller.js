@@ -67,7 +67,7 @@ export const getFeed = asyncHandler(async (req, res) => {
   // as one batch (it doesn't page the cursor), so we reorder in memory over a
   // bounded pool of recent cards rather than trying to express a per-user,
   // shifting order as a cursor (which pagination can't do cleanly). ---
-  const POOL_SIZE = Math.min(100, limit * 5);
+  const POOL_SIZE = 500
   const pool = await prisma.card.findMany({
     where,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],

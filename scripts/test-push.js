@@ -32,7 +32,7 @@ import { Expo } from 'expo-server-sdk';
 import { prisma } from '../src/db/prisma.js';
 
 const title = process.argv[2] || "Hello Everyone !";
-const body = process.argv[3] || "Please Update your app to the latest version to enjoy new features and improvements.";
+const body = process.argv[3] || "Quiz is live now, check it out !";
 
 const expo = new Expo(
   process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : undefined
