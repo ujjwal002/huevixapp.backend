@@ -51,8 +51,10 @@ export const registerDevice = asyncHandler(async (req, res) => {
 });
 
 // DELETE /notifications/devices — drop this device's token (call on logout).
+// Scoped to the caller's own userId so one user can't unregister another's
+// device by supplying their token value.
 export const unregisterDevice = asyncHandler(async (req, res) => {
   const { token } = req.body || {};
-  if (token) await prisma.deviceToken.deleteMany({ where: { token } });
+  if (token) await prisma.deviceToken.deleteMany({ where: { token, userId: req.user.id } });
   res.json({ success: true });
 });

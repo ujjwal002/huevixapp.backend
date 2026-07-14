@@ -53,10 +53,12 @@ export function initRealtime(httpServer) {
 
   io.use(async (socket, next) => {
     try {
+      // Prefer the Socket.IO-native auth field, then the Authorization header.
+      // Deliberately NOT falling back to the query string: tokens in URLs get
+      // captured in proxy/access logs, browser history, and Referer headers.
       const raw =
         socket.handshake.auth?.token ||
-        (socket.handshake.headers?.authorization || '').replace(/^Bearer\s+/i, '') ||
-        socket.handshake.query?.token;
+        (socket.handshake.headers?.authorization || '').replace(/^Bearer\s+/i, '');
       if (!raw) {
         console.log('[rt] AUTH FAIL: no token on handshake');
         return next(new Error('UNAUTHENTICATED'));

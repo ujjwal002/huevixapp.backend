@@ -1,4 +1,8 @@
-import bcrypt from 'bcryptjs';
+// Native bcrypt (not bcryptjs): same algorithm and hash format, but the work
+// runs on libuv's threadpool instead of the main JS thread — so a burst of
+// logins no longer contends the event loop. Existing bcryptjs-created hashes in
+// the DB verify unchanged (both produce/accept standard $2a$/$2b$ bcrypt).
+import bcrypt from 'bcrypt';
 import { config } from '../config/env.js';
 
 export const hashPassword = (plain) => bcrypt.hash(plain, config.bcryptRounds);

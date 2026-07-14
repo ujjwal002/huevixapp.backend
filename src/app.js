@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import morgan from 'morgan';
 import { config } from './config/env.js';
 import routes from './routes/index.js';
@@ -45,6 +46,12 @@ app.use(requestId);
 // audio can be loaded by the frontend (port 5173) without weakening every
 // other response.
 app.use(helmet());
+// Gzip/brotli JSON and text responses (feeds, /meta, leaderboards, history) —
+// a big win on mobile/cellular. compression's default filter already skips
+// already-compressed types (audio/image), so /static media isn't re-compressed.
+// If you later enable gzip in nginx, this becomes a no-op (nginx won't
+// re-compress a response already marked Content-Encoding: gzip).
+app.use(compression());
 app.use(
   cors({
     origin: (origin, cb) => {

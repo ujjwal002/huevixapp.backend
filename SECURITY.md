@@ -7,6 +7,33 @@
 
 ---
 
+> ### ⚠️ Update — 15 July 2026
+>
+> **The "all green" status below is a snapshot from 30 June 2026 and is no
+> longer fully accurate.** Dependency advisories accumulate over time, so a
+> point-in-time audit goes stale. As of 15 July 2026:
+>
+> - **`npm audit` reports 8 advisories** (was "1" on 30 June): 1 critical,
+>   1 high, and 6 moderate.
+> - **The one reachable production high (`nodemailer` — SMTP/CRLF injection,
+>   header injection, domain confusion) has been fixed** by upgrading to
+>   `nodemailer@^9.0.3`.
+> - **Remaining production advisories: 2 moderate**, both from `uuid` pulled in
+>   transitively by the *optional* Azure Speech SDK. Only exploitable if `buf`
+>   is passed to `uuid` (the SDK controls this, not our code); npm's auto-fix is
+>   a *downgrade* of the SDK, so it's intentionally left in place and tracked.
+> - **The critical + remaining high are dev-tooling only** (`vitest` / `vite` /
+>   `esbuild`), not shipped to users and only exploitable with a dev server
+>   running. Bump these opportunistically (they need a major-version upgrade).
+> - **A CI audit gate was added** (`.github/workflows/ci.yml`): the build now
+>   fails on any HIGH+ advisory in *production* dependencies, so this can't
+>   silently drift again. A non-blocking full audit keeps dev advisories visible.
+>
+> Treat Section 5's table as historical. Current dependency status is enforced
+> in CI, not in this document.
+
+---
+
 ## 1. What this document is
 
 This is a record of the full security review and hardening done on your backend, plus a simple routine to keep it secure going forward.
@@ -101,7 +128,7 @@ The Postgres password was regenerated and updated in both Postgres and `.env`. A
 - **Daily backup** at 3 AM via cron, script at `~/backups/backup.sh`.
 - Backups are compressed (`.sql.gz`), local copies kept 14 days.
 - **Restore was tested** into a throwaway database — all data came back correctly (19 users verified). *A backup you have never restored is just a hope; this one is proven.*
-- **Off-site copy to S3** — each backup uploads to the S3 bucket `huevix-db-backups-2026`, using an IAM role (no keys stored on the server). So losing the EC2 box does not lose your backups.
+- **Off-site copy to S3** — each backup uploads to the S3 bucket `<your-backup-bucket>`, using an IAM role (no keys stored on the server). So losing the EC2 box does not lose your backups.
 
 ### #4.7 — Automatic OS security updates — DONE
 `unattended-upgrades` is installed and **active**, so security patches install automatically.
@@ -207,7 +234,7 @@ This is the important part. None of it takes long.
 - Environment / secrets: `~/huevixapp.backend/.env`
 - Backup script: `~/backups/backup.sh`
 - Local backups: `~/backups/huevix_*.sql.gz`
-- Off-site backups: S3 bucket `huevix-db-backups-2026`
+- Off-site backups: S3 bucket `<your-backup-bucket>`
 - Google service account key: `~/huevixapp.backend/play-service-account.json`
 
 **Common commands:**

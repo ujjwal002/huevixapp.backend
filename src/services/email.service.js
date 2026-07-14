@@ -53,16 +53,27 @@ async function sendViaResend({ to, subject, text }) {
 }
 
 async function sendMail({ to, subject, text }) {
-  if (config.mockExternal || (!config.email.resendApiKey && !config.email.host)) {
+  // Console-log path is DEV ONLY. It prints the OTP, so it must never run in
+  // production — otherwise a prod deploy that forgot to configure an email
+  // transport would leak reset/verification codes into plaintext logs.
+  if (
+    config.env !== 'production' &&
+    (config.mockExternal || (!config.email.resendApiKey && !config.email.host))
+  ) {
     console.log(`[email:mock] to=${to} subject="${subject}"\n${text}`);
     return { mock: true };
   }
   if (config.email.resendApiKey) return sendViaResend({ to, subject, text });
-  const transport = await getTransport();
-  await withTimeout(transport.sendMail({ from: config.email.from, to, subject, text }), {
-    label: 'SMTP send',
-  });
-  return { sent: true, provider: 'smtp' };
+  if (config.email.host) {
+    const transport = await getTransport();
+    await withTimeout(transport.sendMail({ from: config.email.from, to, subject, text }), {
+      label: 'SMTP send',
+    });
+    return { sent: true, provider: 'smtp' };
+  }
+  // Production with no transport configured: fail loudly rather than silently
+  // dropping (or logging) the code.
+  throw new Error('No email transport configured (set RESEND_API_KEY or SMTP_HOST)');
 }
 
 const hashCode = (code) => crypto.createHash('sha256').update(String(code)).digest('hex');

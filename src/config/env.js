@@ -254,9 +254,13 @@ if (isProd) {
   const problems = [];
   if (!process.env.JWT_ACCESS_SECRET || config.jwt.accessSecret === DEV_ACCESS_SECRET) {
     problems.push('JWT_ACCESS_SECRET is missing or using the insecure dev default');
+  } else if (process.env.JWT_ACCESS_SECRET.length < 32) {
+    problems.push('JWT_ACCESS_SECRET is too short (use at least 32 characters)');
   }
   if (!process.env.JWT_REFRESH_SECRET || config.jwt.refreshSecret === DEV_REFRESH_SECRET) {
     problems.push('JWT_REFRESH_SECRET is missing or using the insecure dev default');
+  } else if (process.env.JWT_REFRESH_SECRET.length < 32) {
+    problems.push('JWT_REFRESH_SECRET is too short (use at least 32 characters)');
   }
   if (config.mockExternal) {
     problems.push(

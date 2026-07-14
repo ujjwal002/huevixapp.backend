@@ -11,6 +11,7 @@ import { saveBuffer } from '../services/storage.service.js';
 import { summarizeArticle } from '../services/ai.service.js';
 
 import { adminArticleVocabSchema } from '../validators/schemas.js';
+import { sniffImageExt } from '../utils/imageType.js';
 
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -62,37 +63,52 @@ export const getFeed = asyncHandler(async (req, res) => {
     });
   }
 
-  // --- Logged-in: UNSEEN first, then SEEN as fallback. The app loads the feed
-  // as one batch (it doesn't page the cursor), so we reorder in memory over a
-  // bounded pool of recent cards rather than trying to express a per-user,
-  // shifting order as a cursor (which pagination can't do cleanly). ---
-  const POOL_SIZE = 500;
-  const pool = await prisma.card.findMany({
-    where,
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: POOL_SIZE,
+  // --- Logged-in: UNSEEN first, then SEEN as fallback. Instead of pulling a
+  // fixed 500-row pool and splitting it in memory, ask the DB directly:
+  //   unseen = cards with NO completion row for this user (`completions:{none}`)
+  //   seen   = cards that have one (`completions:{some}`) — only used to top up
+  // This reads ~limit rows (a NOT EXISTS / EXISTS subquery over the indexed
+  // CardCompletion), not 500, and surfaces unseen cards even when they're older
+  // than the 500 most recent. The app loads the feed as one batch, so there's
+  // still no cursor. ---
+  const orderBy = [{ createdAt: 'desc' }, { id: 'desc' }];
+  const uid = req.user.id;
+
+  const unseen = await prisma.card.findMany({
+    where: { ...where, completions: { none: { userId: uid } } },
+    orderBy,
+    take: limit,
     select: FEED_CARD_SELECT,
   });
 
-  const poolIds = pool.map((c) => c.id);
+  // Not enough fresh cards -> top up with the most recent SEEN ones so the feed
+  // is never empty (skips the second query entirely once the user has enough
+  // unseen cards, which is the common case).
+  let ordered = unseen;
+  if (unseen.length < limit) {
+    const seen = await prisma.card.findMany({
+      where: { ...where, completions: { some: { userId: uid } } },
+      orderBy,
+      take: limit - unseen.length,
+      select: FEED_CARD_SELECT,
+    });
+    ordered = [...unseen, ...seen];
+  }
+
+  // Progress + saved state for just the returned set (<= limit rows).
+  const ids = ordered.map((c) => c.id);
   const [seenRows, savedRows] = await Promise.all([
     prisma.cardCompletion.findMany({
-      where: { userId: req.user.id, cardId: { in: poolIds } },
+      where: { userId: uid, cardId: { in: ids } },
       select: { cardId: true, readDone: true, listenDone: true },
     }),
     prisma.savedCard.findMany({
-      where: { userId: req.user.id, cardId: { in: poolIds } },
+      where: { userId: uid, cardId: { in: ids } },
       select: { cardId: true },
     }),
   ]);
   const seenMap = new Map(seenRows.map((r) => [r.cardId, r]));
   const savedSet = new Set(savedRows.map((s) => s.cardId));
-
-  // Split, preserving newest→oldest order within each group.
-  const unseen = [];
-  const seen = [];
-  for (const c of pool) (seenMap.has(c.id) ? seen : unseen).push(c);
-  const ordered = [...unseen, ...seen].slice(0, limit);
 
   res.json({
     items: ordered.map((c) => ({
@@ -247,6 +263,9 @@ export const generateAndCreateCard = asyncHandler(async (req, res) => {
 export const createArticleFromNews = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('An image file is required (field "image")');
 
+  const imgExt = sniffImageExt(req.file.buffer);
+  if (!imgExt) throw ApiError.badRequest('Uploaded file is not a supported image', 'BAD_IMAGE');
+
   const targetLanguage = req.body.targetLanguage || 'en';
   const nativeLanguage = req.body.nativeLanguage || 'hi';
   const level = req.body.level || 'INTERMEDIATE';
@@ -265,7 +284,7 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
 
   const { url: imageUrl } = await saveBuffer(req.file.buffer, {
     folder: 'images',
-    ext: imageExt(req.file.mimetype),
+    ext: imgExt,
   });
 
   const card = await prisma.card.create({
@@ -307,6 +326,9 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
 export const createAdminArticle = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('An image file is required (field "image")');
 
+  const imgExt = sniffImageExt(req.file.buffer);
+  if (!imgExt) throw ApiError.badRequest('Uploaded file is not a supported image', 'BAD_IMAGE');
+
   const targetLanguage = req.body.targetLanguage || 'en';
   const nativeLanguage = req.body.nativeLanguage || 'hi';
   const level = req.body.level || 'INTERMEDIATE';
@@ -333,7 +355,7 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
 
   const { url: imageUrl } = await saveBuffer(req.file.buffer, {
     folder: 'images',
-    ext: imageExt(req.file.mimetype),
+    ext: imgExt,
   });
 
   const card = await prisma.card.create({
@@ -367,18 +389,6 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
   const fresh = await prisma.card.findUnique({ where: { id: card.id }, include: { vocab: true } });
   res.status(201).json(fresh);
 });
-
-function imageExt(mimetype) {
-  const map = {
-    'image/jpeg': 'jpg',
-    'image/jpg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'image/heic': 'heic',
-    'image/gif': 'gif',
-  };
-  return map[(mimetype || '').toLowerCase()] || 'jpg';
-}
 
 // Helper: synthesize TTS once and cache the URL on the card.
 async function generateAndAttachAudio(cardId, text, targetLanguage) {
