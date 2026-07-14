@@ -3,6 +3,8 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config/env.js';
+import { withTimeout } from '../utils/withTimeout.js';
+import { imageExtFromMime } from '../utils/image.js';
 
 // Storage abstraction. Flip the WHOLE app between local disk and S3 with the
 // single STORAGE_DRIVER env var (local | s3). Callers never change.
@@ -95,6 +97,44 @@ export async function saveBuffer(buffer, { folder = 'misc', ext = 'bin' } = {}) 
 }
 
 // Resolve a stored key to an absolute on-disk path (LOCAL driver only), with a
+// Download a remote image and persist it via saveBuffer, returning its stored
+// { key, url } — or null if it can't be fetched or isn't an image type we store.
+// Used to RE-HOST third-party images (e.g. news article photos) into our own
+// bucket, so the feed never hotlinks a URL that can rot, rate-limit us, or track
+// our users. Best-effort BY DESIGN: on any failure it returns null and the
+// caller falls back to the original URL, so re-hosting can never drop a card.
+export async function saveImageFromUrl(
+  url,
+  { folder = 'images', maxBytes = 8 * 1024 * 1024 } = {}
+) {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  try {
+    const res = await withTimeout(
+      fetch(url, { redirect: 'follow', headers: { 'User-Agent': 'HuevixBot/1.0' } }),
+      { label: 'image download' }
+    );
+    if (!res.ok) return null;
+
+    // Only store real images, and only types we can serve safely (SVG rejected).
+    const ext = imageExtFromMime(res.headers.get('content-type'));
+    if (!ext) return null;
+
+    // Reject oversized payloads: trust Content-Length when present as a fast
+    // pre-check, then enforce the cap again after reading (the header can be
+    // absent or wrong).
+    const declared = Number(res.headers.get('content-length') || 0);
+    if (declared && declared > maxBytes) return null;
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length === 0 || buffer.length > maxBytes) return null;
+
+    return await saveBuffer(buffer, { folder, ext });
+  } catch {
+    // Network error, DNS failure, timeout (withTimeout throws), etc. — degrade
+    // to the original URL rather than failing the whole publish.
+    return null;
+  }
+}
 // path-traversal guard: a crafted key can never escape the storage root.
 // Returns null if the key is unsafe or the file does not exist.
 export function resolveLocalPath(key) {

@@ -28,6 +28,15 @@ const safeLinkUrl = z
     message: 'URL must be http(s) or a root-relative path (not //, javascript:, or data:)',
   });
 
+// Multipart form fields arrive as strings, so a boolean flag sent alongside a
+// file upload comes in as "true"/"false". Accept those and real booleans (from
+// JSON clients) uniformly; anything else falls through to z.boolean()'s error.
+const boolish = z.preprocess((v) => {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return v;
+}, z.boolean());
+
 export const registerSchema = {
   body: z.object({
     email: emailField,
@@ -307,7 +316,7 @@ export const createSponsoredSchema = {
     ctaText: z.string().min(1).max(24).optional(),
     ctaUrl: safeLinkUrl,
     imageUrl: z.union([safeLinkUrl, z.literal('')]).optional(),
-    isActive: z.boolean().optional(),
+     isActive: boolish.optional(),
   }),
 };
 
@@ -321,7 +330,7 @@ export const updateSponsoredSchema = {
       ctaText: z.string().min(1).max(24).optional(),
       ctaUrl: safeLinkUrl.optional(),
       imageUrl: z.union([safeLinkUrl, z.literal('')]).optional(),
-      isActive: z.boolean().optional(),
+      isActive: boolish.optional(),
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
 };

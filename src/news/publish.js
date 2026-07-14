@@ -8,6 +8,7 @@ import { getActiveProvider } from './registry.js';
 import { summarizeArticle } from './summarize.js';
 import { isAppropriate } from './filter.js';
 import { synthesizeSpeech } from '../services/tts.service.js';
+import { saveImageFromUrl } from '../services/storage.service.js';
 
 function countWords(s) {
   return (s || '').trim().split(/\s+/).filter(Boolean).length;
@@ -85,6 +86,12 @@ export async function runNewsBatch(opts = {}) {
         skipped++;
         continue;
       }
+      // Re-host the article photo into our own storage (S3/local) rather than
+      // hotlinking the source. Best-effort: on any download failure we keep the
+      // original URL so the card still has an image (the feed filter already
+      // guaranteed article.imageUrl exists).
+      const hosted = await saveImageFromUrl(article.imageUrl);
+      const imageUrl = hosted?.url || article.imageUrl || null;
       const card = await prisma.card.create({
         data: {
           targetLanguage,
@@ -93,7 +100,7 @@ export async function runNewsBatch(opts = {}) {
           body: summary.body,
           wordCount: countWords(summary.body),
           isPublished: publish,
-          imageUrl: article.imageUrl || null,
+          imageUrl,
           sourceUrl: article.url,
           // Attach the vocab glossary (complex words from the article) — same as
           // manual/AI cards, so users can learn vocabulary from the news.

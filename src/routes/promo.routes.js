@@ -9,16 +9,20 @@ import {
   confirmPromoGoogleSchema,
 } from '../validators/schemas.js';
 import { metricsLimiter, promoCreateLimiter } from '../middleware/rateLimit.js';
+import { uploadImage } from '../middleware/upload.js';
 import * as promo from '../controllers/promo.controller.js';
 
 const router = Router();
 
 // --- Purchase (Google Play only; the Razorpay create/confirm/pay routes were
 // --- removed with the payments migration) ----------------------------------
+// uploadImage (multer) must run before validate so multipart text fields are
+// parsed into req.body. Sending JSON with an imageUrl string still works.
 router.post(
   '/google',
   requireAuth,
   promoCreateLimiter,
+  uploadImage('image'),
   validate(createPromoSchema),
   promo.createPromoGoogle
 );

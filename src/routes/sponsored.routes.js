@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
+import { uploadImage } from '../middleware/upload.js';
 import {
   createSponsoredSchema,
   updateSponsoredSchema,
@@ -19,11 +20,21 @@ const router = Router();
 router.get('/', listSponsored); // public
 
 router.get('/admin', requireAuth, requireAdmin, listAllSponsored);
-router.post('/admin', requireAuth, requireAdmin, validate(createSponsoredSchema), createSponsored);
+// uploadImage (multer) must run before validate so multipart text fields are
+// parsed into req.body. Sending JSON with an imageUrl string still works.
+router.post(
+  '/admin',
+  requireAuth,
+  requireAdmin,
+  uploadImage('image'),
+  validate(createSponsoredSchema),
+  createSponsored
+);
 router.patch(
   '/admin/:id',
   requireAuth,
   requireAdmin,
+  uploadImage('image'),
   validate(updateSponsoredSchema),
   updateSponsored
 );

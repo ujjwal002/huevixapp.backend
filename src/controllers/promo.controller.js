@@ -6,9 +6,20 @@ import { refundPayment } from '../services/payment.service.js';
 import { notifyPromoLive } from '../services/notification.service.js';
 
 import * as gp from '../services/googlePlay.service.js';
+import { saveBuffer } from '../services/storage.service.js';
+import { imageExtFromMime, SUPPORTED_IMAGE_LABEL } from '../utils/image.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 30;
+
+// Store an uploaded promo image (multer memory file) through the storage layer
+// and return its public URL. Writes to local disk or S3 per STORAGE_DRIVER.
+async function storeUploadedImage(file) {
+  const ext = imageExtFromMime(file.mimetype);
+  if (!ext) throw ApiError.badRequest(`Unsupported image type (use ${SUPPORTED_IMAGE_LABEL})`, 'BAD_IMAGE');
+  const { url } = await saveBuffer(file.buffer, { folder: 'images', ext });
+  return url;
+}
 
 // --------------------------- Admin review ---------------------------------
 export const listPromosForReview = asyncHandler(async (_req, res) => {
@@ -189,6 +200,9 @@ export const createPromoGoogle = asyncHandler(async (req, res) => {
   if (!(productId in PROMO_DAYS)) throw ApiError.badRequest('Unsupported duration', 'BAD_DAYS');
 
   const amountPaise = config.pricing.promoPerDayInr * nDays * 100;
+  // An uploaded file is stored to S3/local and takes precedence over any
+  // imageUrl string, so existing JSON clients keep working unchanged.
+  const storedImageUrl = req.file ? await storeUploadedImage(req.file) : imageUrl || null;
   const promo = await prisma.startupPromo.create({
     data: {
       ownerId: req.user.id,
@@ -197,7 +211,7 @@ export const createPromoGoogle = asyncHandler(async (req, res) => {
       body,
       ctaUrl,
       ctaText: ctaText || 'Visit',
-      imageUrl: imageUrl || null,
+      imageUrl: storedImageUrl,
       days: nDays,
       amountPaise,
       status: 'PENDING_PAYMENT',
