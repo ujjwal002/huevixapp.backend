@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 import { withTimeout } from '../utils/withTimeout.js';
+import { timingSafeEqualStr } from '../utils/crypto.js';
 
 // =============================================================================
 // Outbound email + OTP lifecycle (email verification & password reset).
@@ -66,16 +67,6 @@ async function sendMail({ to, subject, text }) {
 
 const hashCode = (code) => crypto.createHash('sha256').update(String(code)).digest('hex');
 
-function constantTimeEqual(aHex, bHex) {
-  const a = Buffer.from(String(aHex), 'utf8');
-  const b = Buffer.from(String(bHex), 'utf8');
-  if (a.length !== b.length) {
-    crypto.timingSafeEqual(a, a);
-    return false;
-  }
-  return crypto.timingSafeEqual(a, b);
-}
-
 // Issue a fresh OTP of `type` for the user, invalidating any previous live
 // codes of the same type (exactly one valid code at a time), and email it.
 export async function issueOtp(user, type) {
@@ -116,7 +107,7 @@ export async function verifyOtp(userId, type, code) {
   });
   if (!token) return { ok: false, reason: 'CODE_EXPIRED' };
 
-  if (!constantTimeEqual(token.codeHash, hashCode(code))) {
+  if (!timingSafeEqualStr(token.codeHash, hashCode(code))) {
     const bumped = await prisma.emailToken.update({
       where: { id: token.id },
       data: { attempts: { increment: 1 } },

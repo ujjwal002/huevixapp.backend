@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { generateQuizQuestions, QUIZ_QUESTION_COUNT } from './quizAi.service.js';
 import { isSubscriptionActive } from './entitlement.service.js';
+import { startOfUtcDay } from '../utils/dates.js';
 
 // =============================================================================
 // Quiz scoring + monthly leaderboard + single monthly winner.
@@ -25,11 +26,6 @@ const FAST_COMPLETE_FLAG_SECONDS = 20; // perfect score finished faster than thi
 const AD_EVERY_N_QUESTIONS = 5;
 
 // --- date helpers (UTC) ------------------------------------------------------
-function utcDayStart(d = new Date()) {
-  const x = new Date(d);
-  x.setUTCHours(0, 0, 0, 0);
-  return x;
-}
 export function periodOf(date = new Date()) {
   const d = new Date(date);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -41,7 +37,7 @@ export function periodOf(date = new Date()) {
 // any transaction; the unique([date,targetLanguage]) constraint makes two
 // concurrent first-requests safe (one creates, the other reads).
 export async function getOrCreateTodayQuiz(targetLanguage = 'en') {
-  const date = utcDayStart();
+  const date = startOfUtcDay();
   const existing = await prisma.dailyQuiz.findUnique({
     where: { date_targetLanguage: { date, targetLanguage } },
     include: { questions: { orderBy: { order: 'asc' } } },
@@ -130,7 +126,7 @@ async function bumpQuizStreak(tx, userId, today) {
     where: { id: userId },
     select: { quizCurrentStreak: true, quizLongestStreak: true, quizLastPlayedDate: true },
   });
-  const last = u?.quizLastPlayedDate ? utcDayStart(u.quizLastPlayedDate) : null;
+  const last = u?.quizLastPlayedDate ? startOfUtcDay(u.quizLastPlayedDate) : null;
   const yesterday = new Date(today);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
 
@@ -156,8 +152,9 @@ export async function submitAnswer(user, { questionId, chosenIndex }) {
   if (question.voided) return { error: 'VOIDED' };
 
   // Points are only for TODAY's quiz.
-  const today = utcDayStart();
-  if (utcDayStart(question.quiz.date).getTime() !== today.getTime()) return { error: 'NOT_TODAY' };
+  const today = startOfUtcDay();
+  if (startOfUtcDay(question.quiz.date).getTime() !== today.getTime())
+    return { error: 'NOT_TODAY' };
 
   const optionCount = Array.isArray(question.options) ? question.options.length : 0;
   if (!Number.isInteger(chosenIndex) || chosenIndex < 0 || chosenIndex >= optionCount) {
@@ -303,7 +300,7 @@ export async function getLeaderboard(user, { limit = 20 } = {}) {
 
 export async function getMyQuizStatus(user) {
   const period = periodOf();
-  const today = utcDayStart();
+  const today = startOfUtcDay();
   const targetLanguage = user.targetLanguage || 'en';
 
   const [score, u, pendingWin, quiz] = await Promise.all([

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { config } from '../config/env.js';
+import { timingSafeEqualStr } from '../utils/crypto.js';
 
 // Rewarded-ad verification.
 //
@@ -25,16 +26,6 @@ import { config } from '../config/env.js';
 
 const REPLAY_WINDOW_SECONDS = 10 * 60; // tokens carrying a timestamp expire after 10 min
 
-function constantTimeHexEqual(aHex, bHex) {
-  const a = Buffer.from(String(aHex), 'utf8');
-  const b = Buffer.from(String(bHex || ''), 'utf8');
-  if (a.length !== b.length) {
-    crypto.timingSafeEqual(a, a); // spend equivalent work; don't leak length via timing
-    return false;
-  }
-  return crypto.timingSafeEqual(a, b);
-}
-
 export function verifyAdReward({ token, signature } = {}) {
   if (config.mockExternal) return { ok: true, mock: true };
 
@@ -48,7 +39,7 @@ export function verifyAdReward({ token, signature } = {}) {
   }
 
   const expected = crypto.createHmac('sha256', secret).update(String(token)).digest('hex');
-  if (!constantTimeHexEqual(expected, signature)) {
+  if (!timingSafeEqualStr(expected, signature)) {
     return { ok: false, reason: 'AD_SIGNATURE_INVALID' };
   }
 

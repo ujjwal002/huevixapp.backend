@@ -49,3 +49,6 @@ const json = await res.json();
 console.log('HTTP', res.status);
 console.log(JSON.stringify(json, null, 2).slice(0, 800));
 "
+
+
+npm run format && npm run lint && npm test

@@ -204,14 +204,12 @@ export const createPromoGoogle = asyncHandler(async (req, res) => {
     },
   });
 
-  res
-    .status(201)
-    .json({
-      promoId: promo.id,
-      productId,
-      days: nDays,
-      amountInr: config.pricing.promoPerDayInr * nDays,
-    });
+  res.status(201).json({
+    promoId: promo.id,
+    productId,
+    days: nDays,
+    amountInr: config.pricing.promoPerDayInr * nDays,
+  });
 });
 
 // POST /promos/:id/confirm-google — verify the Google Play purchase, send to review.

@@ -8,6 +8,7 @@ import { registerTutorCalls, cleanupTutorInvites, deliverPendingInvites } from '
 import { registerSignaling } from './signaling.js';
 import { handleDisconnect, startBillingWatchdog } from './rooms.js';
 
+import { createAdapter } from '@socket.io/redis-adapter';
 import { getPubSub, redisEnabled } from '../db/redis.js';
 
 let io = null;

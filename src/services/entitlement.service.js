@@ -176,17 +176,33 @@ export async function refundCredit(user, source) {
 // today), NOT the spendable balance, so a user can no longer earn unlimited
 // credits by spending and re-watching ads. The conditional updateMany also
 // makes granting atomic, so concurrent claims cannot exceed the daily cap.
-export async function grantAdCredit(user) {
-  await ensureDailyAdCredits(user);
+// SINGLE SOURCE OF TRUTH for granting a rewarded-ad speaking credit, keyed by
+// userId so BOTH entry points share it: the in-app /ads/reward endpoint (via
+// grantAdCredit below) and AdMob's server-to-server SSV callback (which only
+// has a userId, no req.user object). The daily cap is enforced by the atomic
+// conditional updateMany — concurrent claims can't exceed it (the ones over the
+// cap match 0 rows). Does NOT check subscription; callers that need that gate it
+// themselves (grantAdCredit does; SSV intentionally grants regardless).
+export async function grantAdCreditByUserId(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      adCreditsRemaining: true,
+      adCreditsGrantedToday: true,
+      adCreditsGrantedDate: true,
+    },
+  });
+  if (!user) return { granted: false, reason: 'USER_NOT_FOUND' };
 
-  if (isSubscriptionActive(user)) {
-    return { granted: false, reason: 'ALREADY_SUBSCRIBED' };
-  }
+  // Race-safe daily reset (conditional updateMany), shared with every other
+  // daily counter — replaces the old non-atomic reset in the SSV controller.
+  await ensureDailyAdCredits(user);
 
   const max = config.entitlement.maxAdCreditsPerDay;
   const today = startOfUtcDay();
   const r = await prisma.user.updateMany({
-    where: { id: user.id, adCreditsGrantedToday: { lt: max } },
+    where: { id: userId, adCreditsGrantedToday: { lt: max } },
     data: {
       adCreditsRemaining: { increment: 1 },
       adCreditsGrantedToday: { increment: 1 },
@@ -203,17 +219,34 @@ export async function grantAdCredit(user) {
   }
 
   const fresh = await prisma.user.findUnique({
-    where: { id: user.id },
+    where: { id: userId },
     select: { adCreditsRemaining: true, adCreditsGrantedToday: true },
   });
-  user.adCreditsRemaining = fresh.adCreditsRemaining;
-  user.adCreditsGrantedToday = fresh.adCreditsGrantedToday;
   return {
     granted: true,
     adCreditsRemaining: fresh.adCreditsRemaining,
     grantedToday: fresh.adCreditsGrantedToday,
     dailyCap: max,
   };
+}
+
+// In-app path (/ads/reward): free users only — an active subscriber already has
+// unlimited speaking, so granting an ad credit is pointless. Delegates the cap
+// enforcement to grantAdCreditByUserId, then syncs the in-memory user object so
+// the caller sees fresh balances.
+export async function grantAdCredit(user) {
+  await ensureDailyAdCredits(user);
+
+  if (isSubscriptionActive(user)) {
+    return { granted: false, reason: 'ALREADY_SUBSCRIBED' };
+  }
+
+  const result = await grantAdCreditByUserId(user.id);
+  if (result.granted) {
+    user.adCreditsRemaining = result.adCreditsRemaining;
+    user.adCreditsGrantedToday = result.grantedToday;
+  }
+  return result;
 }
 
 export async function getEntitlementSummary(user) {

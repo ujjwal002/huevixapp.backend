@@ -26,8 +26,7 @@
 import crypto from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { prisma } from '../db/prisma.js';
-import { config } from '../config/env.js';
-import { grantAdCallSeconds } from '../services/entitlement.service.js';
+import { grantAdCallSeconds, grantAdCreditByUserId } from '../services/entitlement.service.js';
 
 const KEYS_URL = 'https://www.gstatic.com/admob/reward/verifier-keys.json';
 
@@ -50,42 +49,6 @@ async function getVerifierKeys() {
   }
   keyCache = { fetchedAt: now, keys };
   return keys;
-}
-
-// Grant one rewarded-ad credit to a specific user id, honoring the daily cap.
-// Mirrors grantAdCredit() but keyed by userId (no req.user object here).
-async function grantAdCreditByUserId(userId) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, adCreditsGrantedToday: true, adCreditsGrantedDate: true },
-  });
-  if (!user) return { granted: false, reason: 'USER_NOT_FOUND' };
-
-  const max = config.entitlement?.maxAdCreditsPerDay ?? 3;
-
-  // Reset the daily counter if the stored date isn't today (UTC).
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const storedDate = user.adCreditsGrantedDate ? new Date(user.adCreditsGrantedDate) : null;
-  const isNewDay = !storedDate || storedDate.getTime() !== today.getTime();
-
-  if (isNewDay) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { adCreditsGrantedToday: 0, adCreditsGrantedDate: today },
-    });
-  }
-
-  const r = await prisma.user.updateMany({
-    where: { id: userId, adCreditsGrantedToday: { lt: max } },
-    data: {
-      adCreditsRemaining: { increment: 1 },
-      adCreditsGrantedToday: { increment: 1 },
-      adCreditsGrantedDate: today,
-    },
-  });
-  if (r.count === 0) return { granted: false, reason: 'DAILY_AD_LIMIT' };
-  return { granted: true };
 }
 
 // Dedup store for transaction_id lives in ProcessedPurchase-like fashion; we use

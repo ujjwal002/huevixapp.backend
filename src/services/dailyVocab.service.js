@@ -2,10 +2,6 @@ import { prisma } from '../db/prisma.js';
 import { startOfUtcDay } from '../utils/dates.js';
 import { generateDailyVocab, DAILY_VOCAB_WORD_COUNT } from './vocabAi.service.js';
 
-function utcDayStart(d = new Date()) {
-  return startOfUtcDay(d);
-}
-
 // Gather recently-used words so the generator doesn't repeat them.
 async function recentWords(limit = 400) {
   const rows = await prisma.vocabSetWord.findMany({
@@ -19,7 +15,7 @@ async function recentWords(limit = 400) {
 // Get today's set, generating it (once) if missing. Race-safe: the unique
 // (date, targetLanguage) index means a concurrent create loses and we re-read.
 export async function getOrCreateTodaySet(targetLanguage = 'en') {
-  const date = utcDayStart();
+  const date = startOfUtcDay();
   const existing = await prisma.dailyVocabSet.findUnique({
     where: { date_targetLanguage: { date, targetLanguage } },
     include: { words: { orderBy: { order: 'asc' } } },
@@ -104,7 +100,7 @@ async function bumpVocabStreak(tx, userId, today) {
   });
   const yesterday = new Date(today);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const last = u?.vocabLastPlayedDate ? utcDayStart(u.vocabLastPlayedDate) : null;
+  const last = u?.vocabLastPlayedDate ? startOfUtcDay(u.vocabLastPlayedDate) : null;
 
   let streak;
   if (last && last.getTime() === today.getTime()) streak = u.vocabCurrentStreak || 1;
@@ -128,8 +124,8 @@ export async function submitVocabAnswer(user, { wordId, chosenIndex }) {
   });
   if (!word) return { error: 'NOT_FOUND' };
 
-  const today = utcDayStart();
-  if (utcDayStart(word.set.date).getTime() !== today.getTime()) return { error: 'NOT_TODAY' };
+  const today = startOfUtcDay();
+  if (startOfUtcDay(word.set.date).getTime() !== today.getTime()) return { error: 'NOT_TODAY' };
 
   const optionCount = Array.isArray(word.options) ? word.options.length : 0;
   if (!Number.isInteger(chosenIndex) || chosenIndex < 0 || chosenIndex >= optionCount) {
@@ -187,7 +183,7 @@ export async function submitVocabAnswer(user, { wordId, chosenIndex }) {
 
 // Lightweight status for the Learn card + streak display.
 export async function getMyVocabStatus(user, targetLanguage = 'en') {
-  const today = utcDayStart();
+  const today = startOfUtcDay();
   const set = await prisma.dailyVocabSet.findUnique({
     where: { date_targetLanguage: { date: today, targetLanguage } },
     select: { id: true, _count: { select: { words: true } } },
@@ -213,7 +209,7 @@ export async function getMyVocabStatus(user, targetLanguage = 'en') {
   // If they missed yesterday, the "current" streak is effectively broken for display.
   const yesterday = new Date(today);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const last = u?.vocabLastPlayedDate ? utcDayStart(u.vocabLastPlayedDate) : null;
+  const last = u?.vocabLastPlayedDate ? startOfUtcDay(u.vocabLastPlayedDate) : null;
   const streakAlive =
     last && (last.getTime() === today.getTime() || last.getTime() === yesterday.getTime());
 

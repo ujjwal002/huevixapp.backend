@@ -9,7 +9,7 @@ async function main() {
   const rounds = parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12;
   const passwordHash = await bcrypt.hash('Password123', rounds);
 
-  const admin = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: 'admin@huevix.app' },
     update: {},
     create: {

@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import { timingSafeEqualStr } from '../utils/crypto.js';
 import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -245,11 +245,8 @@ export const verifyGoogleProduct = asyncHandler(async (req, res) => {
 export const googleRtdn = asyncHandler(async (req, res) => {
   const expected = config.googlePlay.rtdnSecret || '';
   const got = req.params.secret || '';
-  if (
-    !expected ||
-    got.length !== expected.length ||
-    !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(expected))
-  ) {
+  // Empty configured secret -> always reject; otherwise constant-time compare.
+  if (!expected || !timingSafeEqualStr(got, expected)) {
     throw ApiError.unauthorized('Bad RTDN secret', 'BAD_RTDN_SECRET');
   }
 
