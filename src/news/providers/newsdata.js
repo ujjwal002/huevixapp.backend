@@ -33,8 +33,8 @@ export const newsdataProvider = {
     for (let i = 0; i < maxPages && collected.length < limit; i++) {
       const params = new URLSearchParams({ apikey: key, language });
       if (categories) params.set('category', categories); // comma-separated
-      if (country) params.set('country', country);        // e.g. "in"
-      if (timeframe) params.set('timeframe', timeframe);   // recency window
+      if (country) params.set('country', country); // e.g. "in"
+      if (timeframe) params.set('timeframe', timeframe); // recency window
       if (page) params.set('page', page);
 
       let json;

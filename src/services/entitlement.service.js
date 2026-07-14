@@ -57,7 +57,10 @@ export async function ensureDailyAdCredits(user) {
 export async function ensureDailyPaidSpeaking(user) {
   const today = startOfUtcDay();
   if (!isSameUtcDay(user.paidSpeakingDate, today)) {
-    await resetIfNewDay(user.id, { dateField: 'paidSpeakingDate', zeroFields: ['paidSpeakingCount'] });
+    await resetIfNewDay(user.id, {
+      dateField: 'paidSpeakingDate',
+      zeroFields: ['paidSpeakingCount'],
+    });
     const fresh = await prisma.user.findUnique({
       where: { id: user.id },
       select: { paidSpeakingCount: true, paidSpeakingDate: true },
@@ -74,7 +77,11 @@ export async function getSpeakingAccess(user) {
     await ensureDailyPaidSpeaking(user);
     const limit = config.entitlement.paidDailySpeakingLimit;
     if ((user.paidSpeakingCount ?? 0) < limit) {
-      return { allowed: true, source: 'SUBSCRIPTION', remainingToday: limit - (user.paidSpeakingCount ?? 0) };
+      return {
+        allowed: true,
+        source: 'SUBSCRIPTION',
+        remainingToday: limit - (user.paidSpeakingCount ?? 0),
+      };
     }
     return {
       allowed: false,
@@ -188,7 +195,11 @@ export async function grantAdCredit(user) {
   });
 
   if (r.count === 0) {
-    return { granted: false, reason: 'DAILY_AD_LIMIT', adCreditsRemaining: user.adCreditsRemaining };
+    return {
+      granted: false,
+      reason: 'DAILY_AD_LIMIT',
+      adCreditsRemaining: user.adCreditsRemaining,
+    };
   }
 
   const fresh = await prisma.user.findUnique({
@@ -459,7 +470,12 @@ export async function getTutorCallAccessById(userId) {
 export async function grantAdCallSeconds(userId) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, callSecondsUsedToday: true, callSecondsDate: true, adCallGrantsToday: true },
+    select: {
+      id: true,
+      callSecondsUsedToday: true,
+      callSecondsDate: true,
+      adCallGrantsToday: true,
+    },
   });
   if (!user) return { granted: false, reason: 'USER_NOT_FOUND' };
   await ensureDailyCallSeconds(user);
@@ -485,7 +501,12 @@ export async function grantAdCallSeconds(userId) {
 export async function remainingCallSeconds(userId, { kind = 'RANDOM', type = 'AUDIO' } = {}) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { coinBalance: true, callSecondsUsedToday: true, callSecondsDate: true, adVideoSecondsRemaining: true },
+    select: {
+      coinBalance: true,
+      callSecondsUsedToday: true,
+      callSecondsDate: true,
+      adVideoSecondsRemaining: true,
+    },
   });
   if (!user) return 0;
 

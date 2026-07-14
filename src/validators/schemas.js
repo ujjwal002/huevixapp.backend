@@ -1,8 +1,5 @@
 import { z } from 'zod';
-import {
-  SUPPORTED_LANGUAGES,
-  SUPPORTED_NATIVE_LANGUAGES,
-} from '../config/env.js';
+import { SUPPORTED_LANGUAGES, SUPPORTED_NATIVE_LANGUAGES } from '../config/env.js';
 
 const targetEnum = z.enum(Object.keys(SUPPORTED_LANGUAGES));
 const nativeEnum = z.enum(Object.keys(SUPPORTED_NATIVE_LANGUAGES));
@@ -254,7 +251,6 @@ export const adminArticleVocabSchema = z
   )
   .max(30);
 
-
 // ---- Startup promos (paid user ads) ----
 export const createPromoSchema = {
   body: z.object({
@@ -329,7 +325,6 @@ export const updateSponsoredSchema = {
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
 };
-
 
 // Rewarded-ad claim. token/signature are optional so the mock/dev flow keeps
 // working with an empty body; in production ad.service verifies them and the

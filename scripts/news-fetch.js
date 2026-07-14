@@ -56,6 +56,10 @@ async function main() {
 
 main().catch(async (e) => {
   console.error('[news] fatal', e);
-  try { await prisma.$disconnect(); } catch {}
+  try {
+    await prisma.$disconnect();
+  } catch {
+    /* already disconnected */
+  }
   process.exit(1);
 });

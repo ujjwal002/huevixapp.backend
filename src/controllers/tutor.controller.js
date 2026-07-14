@@ -35,7 +35,10 @@ export const apply = asyncHandler(async (req, res) => {
 
   const existing = await prisma.tutorProfile.findUnique({ where: { userId: req.user.id } });
   if (existing && existing.status !== 'REJECTED') {
-    throw ApiError.conflict(`You already have a ${existing.status.toLowerCase()} application`, 'ALREADY_APPLIED');
+    throw ApiError.conflict(
+      `You already have a ${existing.status.toLowerCase()} application`,
+      'ALREADY_APPLIED'
+    );
   }
 
   const { bio, languages, experience, upiId } = req.body;
@@ -124,7 +127,10 @@ export const listOnline = asyncHandler(async (req, res) => {
   // wakes the closed app). One batched token query for the whole page.
   const ids = rows.map((p) => p.userId);
   const tokenRows = ids.length
-    ? await prisma.deviceToken.findMany({ where: { userId: { in: ids } }, select: { userId: true } })
+    ? await prisma.deviceToken.findMany({
+        where: { userId: { in: ids } },
+        select: { userId: true },
+      })
     : [];
   const pushable = new Set(tokenRows.map((t) => t.userId));
   const items = rows

@@ -46,11 +46,19 @@ export function registerMatchmaking(io, socket) {
     // Credit gate: the requester must have time for THIS type. Audio can use the
     // free daily allowance + prepaid; video requires prepaid balance only. The
     // waiting partner already passed the same-type check when they queued.
+    // Fail CLOSED on a credit-check error: a random VIDEO call can spend coins,
+    // so if we can't confirm the user can afford it we deny and let them retry
+    // rather than granting a call we might not be able to bill. (Mirrors the
+    // tutor-call preflight in tutorCalls.js.)
     let access;
     try {
       access = await getCallAccessById(socket.data.userId, type);
     } catch {
-      access = { allowed: true };
+      access = {
+        allowed: false,
+        reason: 'ACCESS_CHECK_FAILED',
+        message: 'Could not check your balance. Please try again in a moment.',
+      };
     }
     if (!access.allowed) {
       console.log(`[mm] DENIED  user=${socket.data.userId} reason=${access.reason}`);

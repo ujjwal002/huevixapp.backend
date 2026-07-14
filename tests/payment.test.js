@@ -1,7 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import crypto from 'node:crypto';
 import { config } from '../src/config/env.js';
-import { planAmountInr, planPeriodEnd, verifyPaymentSignature } from '../src/services/payment.service.js';
+import {
+  planAmountInr,
+  planPeriodEnd,
+  verifyPaymentSignature,
+} from '../src/services/payment.service.js';
 
 // Snapshot the config fields these tests mutate, and restore after each test.
 // (The service reads config at call time, so flipping mockExternal/keySecret
@@ -43,7 +47,9 @@ describe('planPeriodEnd', () => {
 describe('verifyPaymentSignature', () => {
   it('accepts unconditionally in mock mode', () => {
     config.mockExternal = true;
-    expect(verifyPaymentSignature({ orderId: 'o', paymentId: 'p', signature: 'whatever' })).toBe(true);
+    expect(verifyPaymentSignature({ orderId: 'o', paymentId: 'p', signature: 'whatever' })).toBe(
+      true
+    );
   });
 
   it('FAILS CLOSED in real mode when no secret is configured', () => {
@@ -60,7 +66,10 @@ describe('verifyPaymentSignature', () => {
     config.razorpay.keySecret = 'test_secret';
     const orderId = 'order_123';
     const paymentId = 'pay_456';
-    const good = crypto.createHmac('sha256', 'test_secret').update(`${orderId}|${paymentId}`).digest('hex');
+    const good = crypto
+      .createHmac('sha256', 'test_secret')
+      .update(`${orderId}|${paymentId}`)
+      .digest('hex');
 
     expect(verifyPaymentSignature({ orderId, paymentId, signature: good })).toBe(true);
     expect(verifyPaymentSignature({ orderId, paymentId, signature: 'deadbeef' })).toBe(false);

@@ -102,7 +102,7 @@ async function ring(io, learnerSocket, tutorProfile, type, excluded) {
       title: '📞 Incoming tutor call',
       body: `${learnerSocket.data.name || 'A learner'} wants a lesson — open Huevix to answer`,
       data: { type: 'tutor_call', inviteId },
-    }).catch(() => { });
+    }).catch(() => {});
   }
   learnerSocket.emit('tutor_ringing', {
     inviteId,
@@ -167,7 +167,9 @@ export function registerTutorCalls(io, socket) {
     let blocked = new Set();
     try {
       blocked = await getBlockedUserIds(socket.data.userId);
-    } catch { /* fail open on blocks only; credit gate already passed */ }
+    } catch {
+      /* fail open on blocks only; credit gate already passed */
+    }
     if (blocked.has(tutorUserId)) {
       return socket.emit('tutor_unavailable', { tutorUserId, reason: 'BLOCKED' });
     }
@@ -191,7 +193,9 @@ export function registerTutorCalls(io, socket) {
     let blocked = new Set();
     try {
       blocked = await getBlockedUserIds(socket.data.userId);
-    } catch { /* see above */ }
+    } catch {
+      /* see above */
+    }
 
     const candidates = await prisma.tutorProfile.findMany({
       where: { status: 'APPROVED', isOnline: true, userId: { not: socket.data.userId } },
@@ -227,7 +231,6 @@ export function registerTutorCalls(io, socket) {
       });
       return;
     }
-
 
     if (!inv.learnerSocket.connected) {
       return socket.emit('tutor_unavailable', { reason: 'LEARNER_LEFT' });

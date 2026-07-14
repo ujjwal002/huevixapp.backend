@@ -94,16 +94,23 @@ async function grantAdCreditByUserId(userId) {
 async function alreadyProcessed(transactionId) {
   if (!transactionId) return false;
   const key = `admob_ssv:${transactionId}`;
-  const existing = await prisma.processedPurchase.findUnique({
-    where: { purchaseToken: key },
-  }).catch(() => null);
+  const existing = await prisma.processedPurchase
+    .findUnique({
+      where: { purchaseToken: key },
+    })
+    .catch(() => null);
   return !!existing;
 }
 async function markProcessed(transactionId, userId, rewardItem) {
   const key = `admob_ssv:${transactionId}`;
   try {
     await prisma.processedPurchase.create({
-      data: { purchaseToken: key, productId: rewardItem || 'ad_reward', userId, orderId: transactionId },
+      data: {
+        purchaseToken: key,
+        productId: rewardItem || 'ad_reward',
+        userId,
+        orderId: transactionId,
+      },
     });
   } catch {
     // unique violation = already processed by a concurrent retry; fine.
@@ -129,7 +136,7 @@ export const admobSsv = asyncHandler(async (req, res) => {
 
   const params = req.query;
   const keyId = String(params.key_id || '');
-  const userId = String(params.user_id || '');       // set by the app on the ad request
+  const userId = String(params.user_id || ''); // set by the app on the ad request
   const transactionId = String(params.transaction_id || '');
   const rewardItem = String(params.reward_item || '');
   const customData = String(params.custom_data || ''); // set by the app: 'call' | '' (speaking)
@@ -147,10 +154,7 @@ export const admobSsv = asyncHandler(async (req, res) => {
   if (!pem) return res.status(400).send('unknown key_id');
 
   // AdMob signature is base64url; convert to a Buffer.
-  const signature = Buffer.from(
-    signatureB64Url.replace(/-/g, '+').replace(/_/g, '/'),
-    'base64'
-  );
+  const signature = Buffer.from(signatureB64Url.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 
   const verifier = crypto.createVerify('SHA256');
   verifier.update(signedPortion);
@@ -176,11 +180,13 @@ export const admobSsv = asyncHandler(async (req, res) => {
   // Route the grant by the app-declared placement: the Talk tab requests
   // 'call' (free call minutes); everything else stays a speaking credit.
   const result =
-    customData === 'call'
-      ? await grantAdCallSeconds(userId)
-      : await grantAdCreditByUserId(userId);
+    customData === 'call' ? await grantAdCallSeconds(userId) : await grantAdCreditByUserId(userId);
   if (result.granted) {
-    await markProcessed(transactionId, userId, customData === 'call' ? 'ad_call_minutes' : rewardItem);
+    await markProcessed(
+      transactionId,
+      userId,
+      customData === 'call' ? 'ad_call_minutes' : rewardItem
+    );
   }
   // Always 200 to AdMob on a validly-signed callback (even if capped), so it
   // doesn't keep retrying.

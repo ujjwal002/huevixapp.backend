@@ -62,15 +62,18 @@ export const adminGenerate = asyncHandler(async (req, res) => {
 
 export const adminSelectWinner = asyncHandler(async (req, res) => {
   const r = await svc.selectWinner(req.body.period, { note: req.body.note });
-  if (r.error === 'NO_PARTICIPANTS') throw ApiError.badRequest('No participants for that month', 'NO_PARTICIPANTS');
-  if (r.error === 'ALREADY_SELECTED') throw ApiError.conflict('Winner already selected for that month', 'ALREADY_SELECTED');
+  if (r.error === 'NO_PARTICIPANTS')
+    throw ApiError.badRequest('No participants for that month', 'NO_PARTICIPANTS');
+  if (r.error === 'ALREADY_SELECTED')
+    throw ApiError.conflict('Winner already selected for that month', 'ALREADY_SELECTED');
   res.status(201).json(r);
 });
 
 export const adminApproveWinner = asyncHandler(async (req, res) => {
   const r = await svc.approveWinner(req.params.id);
   if (r.error === 'NOT_FOUND') throw ApiError.notFound('Winner not found');
-  if (r.error === 'NOT_PENDING_REVIEW') throw ApiError.badRequest('Winner is not awaiting review', 'NOT_PENDING_REVIEW');
+  if (r.error === 'NOT_PENDING_REVIEW')
+    throw ApiError.badRequest('Winner is not awaiting review', 'NOT_PENDING_REVIEW');
   res.json(r);
 });
 

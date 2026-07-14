@@ -11,13 +11,32 @@ const MOCK_CARDS = {
   en: {
     interview: {
       title: 'Nailing the First Impression',
-      body:
-        'In a job interview, the first few minutes are crucial. Recruiters often form an impression before you even sit down. Maintain steady eye contact, offer a firm handshake, and articulate your strengths with concrete examples. Avoid vague statements; instead, quantify your achievements. Preparation conveys confidence, and confidence is contagious. When you demonstrate genuine enthusiasm for the role, you become memorable for the right reasons.',
+      body: 'In a job interview, the first few minutes are crucial. Recruiters often form an impression before you even sit down. Maintain steady eye contact, offer a firm handshake, and articulate your strengths with concrete examples. Avoid vague statements; instead, quantify your achievements. Preparation conveys confidence, and confidence is contagious. When you demonstrate genuine enthusiasm for the role, you become memorable for the right reasons.',
       vocab: [
-        { term: 'crucial', partOfSpeech: 'adjective', meaning: 'extremely important', example: 'These minutes are crucial.' },
-        { term: 'articulate', partOfSpeech: 'verb', meaning: 'to express clearly', example: 'Articulate your strengths.' },
-        { term: 'quantify', partOfSpeech: 'verb', meaning: 'to measure with numbers', example: 'Quantify your achievements.' },
-        { term: 'contagious', partOfSpeech: 'adjective', meaning: 'easily spreading to others', example: 'Confidence is contagious.' },
+        {
+          term: 'crucial',
+          partOfSpeech: 'adjective',
+          meaning: 'extremely important',
+          example: 'These minutes are crucial.',
+        },
+        {
+          term: 'articulate',
+          partOfSpeech: 'verb',
+          meaning: 'to express clearly',
+          example: 'Articulate your strengths.',
+        },
+        {
+          term: 'quantify',
+          partOfSpeech: 'verb',
+          meaning: 'to measure with numbers',
+          example: 'Quantify your achievements.',
+        },
+        {
+          term: 'contagious',
+          partOfSpeech: 'adjective',
+          meaning: 'easily spreading to others',
+          example: 'Confidence is contagious.',
+        },
       ],
     },
   },
@@ -59,20 +78,28 @@ export async function generateCard({ targetLanguage, nativeLanguage, level, topi
 
   // --- Real provider call (OpenAI) ---
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: config.ai.apiKey, timeout: config.externalTimeoutMs, maxRetries: 2 });
-  const completion = await withTimeout(client.chat.completions.create({
-    model: config.ai.model,
-    max_tokens: 1200,
-    // Forces a valid JSON object back (prompt must mention JSON, which it does).
-    response_format: { type: 'json_object' },
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a language-learning content writer. Reply with strict JSON only, no markdown.',
-      },
-      { role: 'user', content: buildPrompt({ targetLanguage, nativeLanguage, level, topic }) },
-    ],
-  }), { label: 'content generation' });
+  const client = new OpenAI({
+    apiKey: config.ai.apiKey,
+    timeout: config.externalTimeoutMs,
+    maxRetries: 2,
+  });
+  const completion = await withTimeout(
+    client.chat.completions.create({
+      model: config.ai.model,
+      max_tokens: 1200,
+      // Forces a valid JSON object back (prompt must mention JSON, which it does).
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a language-learning content writer. Reply with strict JSON only, no markdown.',
+        },
+        { role: 'user', content: buildPrompt({ targetLanguage, nativeLanguage, level, topic }) },
+      ],
+    }),
+    { label: 'content generation' }
+  );
   const text = completion.choices?.[0]?.message?.content || '{}';
   const clean = text.replace(/```json|```/g, '').trim();
   const parsed = JSON.parse(clean);
@@ -93,10 +120,16 @@ export async function summarizeArticle({ text, targetLanguage, nativeLanguage })
       ...new Set(words.map((w) => w.replace(/[^A-Za-z]/g, '')).filter((w) => w.length >= 8)),
     ].slice(0, 4);
     return {
-      title: (words.slice(0, 6).join(' ').replace(/[^\w\s]/g, '') || 'News summary').trim(),
+      title: (
+        words
+          .slice(0, 6)
+          .join(' ')
+          .replace(/[^\w\s]/g, '') || 'News summary'
+      ).trim(),
       body: body || text.slice(0, 300),
       vocab: complex.map((w) => ({
-        term: w, partOfSpeech: 'word',
+        term: w,
+        partOfSpeech: 'word',
         meaning: `(${native}) meaning of "${w}"`,
         example: `A sentence using ${w}.`,
       })),
@@ -126,16 +159,26 @@ ${String(text).slice(0, 6000)}
 """`;
 
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: config.ai.apiKey, timeout: config.externalTimeoutMs, maxRetries: 2 });
-  const completion = await withTimeout(client.chat.completions.create({
-    model: config.ai.model,
-    max_tokens: 1400,
-    response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: 'You summarize news for language learners. Reply with strict JSON only, no markdown.' },
-      { role: 'user', content: prompt },
-    ],
-  }));
+  const client = new OpenAI({
+    apiKey: config.ai.apiKey,
+    timeout: config.externalTimeoutMs,
+    maxRetries: 2,
+  });
+  const completion = await withTimeout(
+    client.chat.completions.create({
+      model: config.ai.model,
+      max_tokens: 1400,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You summarize news for language learners. Reply with strict JSON only, no markdown.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    })
+  );
   const txt = completion.choices?.[0]?.message?.content || '{}';
   const parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
   return { title: parsed.title, body: parsed.body, vocab: parsed.vocab || [] };

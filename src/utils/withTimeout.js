@@ -10,7 +10,10 @@ import { ApiError } from './ApiError.js';
 // NOTE: this bounds how long WE wait, not the upstream socket — the underlying
 // request may still be in flight. Where an SDK exposes an AbortSignal, pass it
 // too; this helper is the universal backstop for SDKs that don't.
-export function withTimeout(promise, { ms = config.externalTimeoutMs, label = 'external service' } = {}) {
+export function withTimeout(
+  promise,
+  { ms = config.externalTimeoutMs, label = 'external service' } = {}
+) {
   let timer;
   const timeout = new Promise((_resolve, reject) => {
     timer = setTimeout(() => {

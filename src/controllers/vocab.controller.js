@@ -13,7 +13,8 @@ export const getProgress = asyncHandler(async (req, res) => {
     select: { word: { select: { ladder: true } } },
   });
   const learnedByLadder = {};
-  for (const p of learned) learnedByLadder[p.word.ladder] = (learnedByLadder[p.word.ladder] || 0) + 1;
+  for (const p of learned)
+    learnedByLadder[p.word.ladder] = (learnedByLadder[p.word.ladder] || 0) + 1;
 
   const totalLadders = Object.keys(totalByLadder).length;
   const ladders = [];
@@ -36,19 +37,32 @@ export const getLadder = asyncHandler(async (req, res) => {
 
   if (n > 1) {
     const prevTotal = await prisma.vocabWord.count({ where: { ladder: n - 1 } });
-    const prevLearned = await prisma.vocabProgress.count({ where: { userId: req.user.id, word: { ladder: n - 1 } } });
-    if (prevTotal > 0 && prevLearned < prevTotal) throw ApiError.forbidden('Finish the previous ladder first', 'LADDER_LOCKED');
+    const prevLearned = await prisma.vocabProgress.count({
+      where: { userId: req.user.id, word: { ladder: n - 1 } },
+    });
+    if (prevTotal > 0 && prevLearned < prevTotal)
+      throw ApiError.forbidden('Finish the previous ladder first', 'LADDER_LOCKED');
   }
 
   const words = await prisma.vocabWord.findMany({ where: { ladder: n }, orderBy: { rank: 'asc' } });
   const learnedIds = new Set(
-    (await prisma.vocabProgress.findMany({ where: { userId: req.user.id, word: { ladder: n } }, select: { wordId: true } })).map((p) => p.wordId)
+    (
+      await prisma.vocabProgress.findMany({
+        where: { userId: req.user.id, word: { ladder: n } },
+        select: { wordId: true },
+      })
+    ).map((p) => p.wordId)
   );
   res.json({
     ladder: n,
     words: words.map((w) => ({
-      id: w.id, word: w.word, partOfSpeech: w.partOfSpeech, meaning: w.meaning,
-      translation: w.translation, example: w.example, learned: learnedIds.has(w.id),
+      id: w.id,
+      word: w.word,
+      partOfSpeech: w.partOfSpeech,
+      meaning: w.meaning,
+      translation: w.translation,
+      example: w.example,
+      learned: learnedIds.has(w.id),
     })),
   });
 });

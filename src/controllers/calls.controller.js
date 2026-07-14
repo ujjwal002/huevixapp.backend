@@ -4,7 +4,11 @@ import { prisma } from '../db/prisma.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 
-import { getCallCreditSummary, addCallSeconds, grantAdCallSeconds } from '../services/entitlement.service.js';
+import {
+  getCallCreditSummary,
+  addCallSeconds,
+  grantAdCallSeconds,
+} from '../services/entitlement.service.js';
 
 import {
   createReport,
@@ -120,7 +124,6 @@ export const listBlocks = asyncHandler(async (req, res) => {
   });
 });
 
-
 // append these two handlers:
 export const getCallBalance = asyncHandler(async (req, res) => {
   res.json(await getCallCreditSummary(req.user));
@@ -147,7 +150,8 @@ export const rechargeCall = asyncHandler(async (req, res) => {
   const packs = config.calls.rechargePacks;
   let grant = null;
   if (packId && Object.prototype.hasOwnProperty.call(packs, packId)) grant = packs[packId];
-  else if (config.mockExternal && typeof seconds === 'number' && seconds > 0) grant = Math.round(seconds);
+  else if (config.mockExternal && typeof seconds === 'number' && seconds > 0)
+    grant = Math.round(seconds);
   if (!grant) throw ApiError.badRequest('Unknown recharge pack', 'INVALID_PACK');
   if (!config.mockExternal) {
     // TODO(payments): Razorpay order + verified-webhook credit goes here.

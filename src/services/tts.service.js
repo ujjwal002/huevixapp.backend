@@ -13,10 +13,7 @@ export async function synthesizeSpeech({ text, targetLanguage }) {
 
   if (config.mockExternal || !config.azureSpeech.key) {
     // Return a tiny silent-ish placeholder buffer so the pipeline + storage work.
-    const placeholder = Buffer.from(
-      `MOCK_AUDIO::${targetLanguage}::${text.slice(0, 24)}`,
-      'utf-8'
-    );
+    const placeholder = Buffer.from(`MOCK_AUDIO::${targetLanguage}::${text.slice(0, 24)}`, 'utf-8');
     const { url } = await saveBuffer(placeholder, { folder: 'tts', ext: 'txt' });
     return { url, _mock: true };
   }
@@ -54,7 +51,6 @@ export async function synthesizeSpeech({ text, targetLanguage }) {
   return { url };
 }
 
-
 function escapeXml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -66,7 +62,11 @@ function escapeXml(s) {
 
 export async function synthesizeHindi(
   text,
-  { voice = config.tutor.hindiVoice, pitch = config.tutor.hindiPitch, rate = config.tutor.hindiRate } = {}
+  {
+    voice = config.tutor.hindiVoice,
+    pitch = config.tutor.hindiPitch,
+    rate = config.tutor.hindiRate,
+  } = {}
 ) {
   const hasEleven = !!(config.elevenLabs.apiKey && config.elevenLabs.voiceId);
   const hasAzure = !!config.azureSpeech.key;
@@ -133,7 +133,6 @@ export async function synthesizeHindi(
   return { url };
 }
 
-
 // --- ElevenLabs (natural voice for the tutor) -------------------------------
 
 async function elevenLabsTts(text) {
@@ -151,7 +150,12 @@ async function elevenLabsTts(text) {
       body: JSON.stringify({
         text,
         model_id: modelId,
-        voice_settings: { stability: 0.4, similarity_boost: 0.85, style: 0.35, use_speaker_boost: true },
+        voice_settings: {
+          stability: 0.4,
+          similarity_boost: 0.85,
+          style: 0.35,
+          use_speaker_boost: true,
+        },
       }),
       signal: controller.signal,
     });
@@ -175,7 +179,10 @@ export async function synthesizeWordAudio(text) {
     try {
       return await elevenLabsTts(text);
     } catch (err) {
-      console.warn('[tutor] ElevenLabs word audio failed; falling back to Azure:', err?.message || err);
+      console.warn(
+        '[tutor] ElevenLabs word audio failed; falling back to Azure:',
+        err?.message || err
+      );
     }
   }
   return synthesizeSpeech({ text, targetLanguage: 'en' });

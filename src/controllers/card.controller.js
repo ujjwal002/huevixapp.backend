@@ -8,8 +8,7 @@ import { notifyNewCard } from '../services/notification.service.js';
 
 import { saveBuffer } from '../services/storage.service.js';
 
-
-import {summarizeArticle} from '../services/ai.service.js';
+import { summarizeArticle } from '../services/ai.service.js';
 
 import { adminArticleVocabSchema } from '../validators/schemas.js';
 
@@ -67,7 +66,7 @@ export const getFeed = asyncHandler(async (req, res) => {
   // as one batch (it doesn't page the cursor), so we reorder in memory over a
   // bounded pool of recent cards rather than trying to express a per-user,
   // shifting order as a cursor (which pagination can't do cleanly). ---
-  const POOL_SIZE = 500
+  const POOL_SIZE = 500;
   const pool = await prisma.card.findMany({
     where,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -115,9 +114,7 @@ export const getCard = asyncHandler(async (req, res) => {
         where: { nativeLanguage: req.user?.nativeLanguage || 'hi' },
         select: { term: true, partOfSpeech: true, meaning: true, example: true },
       },
-      ...(req.user
-        ? { savedBy: { where: { userId: req.user.id }, select: { id: true } } }
-        : {}),
+      ...(req.user ? { savedBy: { where: { userId: req.user.id }, select: { id: true } } } : {}),
     },
   });
   if (!card || !card.isPublished) throw ApiError.notFound('Card not found');
@@ -160,7 +157,6 @@ export const completeCard = asyncHandler(async (req, res) => {
   const streak = await touchStreak(req.user.id);
   res.json({ success: true, streak });
 });
-
 
 // POST /cards/:id/seen — record that the user has VIEWED this card (they dwelled
 // on it long enough in the feed). Deliberately separate from /complete: it does
@@ -224,14 +220,14 @@ export const generateAndCreateCard = asyncHandler(async (req, res) => {
       isPublished: publish,
       vocab: generated.vocab?.length
         ? {
-          create: generated.vocab.map((v) => ({
-            nativeLanguage,
-            term: v.term,
-            partOfSpeech: v.partOfSpeech,
-            meaning: v.meaning,
-            example: v.example,
-          })),
-        }
+            create: generated.vocab.map((v) => ({
+              nativeLanguage,
+              term: v.term,
+              partOfSpeech: v.partOfSpeech,
+              meaning: v.meaning,
+              example: v.example,
+            })),
+          }
         : undefined,
     },
   });
@@ -249,7 +245,6 @@ export const generateAndCreateCard = asyncHandler(async (req, res) => {
 // summarizes it (natural level) + extracts complex vocab; we store the image,
 // create the article card, and synthesize audio for listen + speak.
 export const createArticleFromNews = asyncHandler(async (req, res) => {
-
   if (!req.file) throw ApiError.badRequest('An image file is required (field "image")');
 
   const targetLanguage = req.body.targetLanguage || 'en';
@@ -257,9 +252,15 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
   const level = req.body.level || 'INTERMEDIATE';
   const sourceUrl = req.body.sourceUrl?.trim() || null;
   const publish =
-    req.body.publish === undefined ? true : req.body.publish === true || req.body.publish === 'true';
+    req.body.publish === undefined
+      ? true
+      : req.body.publish === true || req.body.publish === 'true';
 
-  const summarized = await summarizeArticle({ text: req.body.text, targetLanguage, nativeLanguage });
+  const summarized = await summarizeArticle({
+    text: req.body.text,
+    targetLanguage,
+    nativeLanguage,
+  });
   const title = (req.body.title && req.body.title.trim()) || summarized.title;
 
   const { url: imageUrl } = await saveBuffer(req.file.buffer, {
@@ -269,14 +270,25 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
 
   const card = await prisma.card.create({
     data: {
-      targetLanguage, level, topic: 'news', title,
+      targetLanguage,
+      level,
+      topic: 'news',
+      title,
       body: summarized.body,
       wordCount: countWords(summarized.body),
-      imageUrl, sourceUrl, isPublished: publish,
+      imageUrl,
+      sourceUrl,
+      isPublished: publish,
       vocab: summarized.vocab?.length
-        ? { create: summarized.vocab.map((v) => ({
-            nativeLanguage, term: v.term, partOfSpeech: v.partOfSpeech, meaning: v.meaning, example: v.example,
-          })) }
+        ? {
+            create: summarized.vocab.map((v) => ({
+              nativeLanguage,
+              term: v.term,
+              partOfSpeech: v.partOfSpeech,
+              meaning: v.meaning,
+              example: v.example,
+            })),
+          }
         : undefined,
     },
   });
@@ -301,7 +313,9 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
   const topic = req.body.topic?.trim() || 'article';
   const sourceUrl = req.body.sourceUrl?.trim() || null;
   const publish =
-    req.body.publish === undefined ? true : req.body.publish === true || req.body.publish === 'true';
+    req.body.publish === undefined
+      ? true
+      : req.body.publish === true || req.body.publish === 'true';
 
   // vocab is optional and arrives as a JSON string in the multipart form.
   let vocab = [];
@@ -355,7 +369,14 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
 });
 
 function imageExt(mimetype) {
-  const map = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/gif': 'gif' };
+  const map = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'image/gif': 'gif',
+  };
   return map[(mimetype || '').toLowerCase()] || 'jpg';
 }
 

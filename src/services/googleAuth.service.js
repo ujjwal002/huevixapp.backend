@@ -48,7 +48,11 @@ export async function verifyGoogleIdToken(idToken) {
   if (!config.googleOAuth.clientIds.length) {
     // Fail closed: real mode with no configured audience means we cannot
     // safely accept ANY token (mirrors the payment-verification policy).
-    throw new ApiError(501, 'Google login is not configured on this server', 'GOOGLE_LOGIN_DISABLED');
+    throw new ApiError(
+      501,
+      'Google login is not configured on this server',
+      'GOOGLE_LOGIN_DISABLED'
+    );
   }
 
   let ticket;

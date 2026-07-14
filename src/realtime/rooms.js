@@ -8,7 +8,6 @@ import {
 } from '../services/entitlement.service.js';
 import { accrueEarning } from '../services/tutor.service.js';
 
-
 // Active 1:1 call rooms, keyed by roomId. This is the in-memory source of truth
 // for a live call; the Call DB row is the durable record (for history/auditing).
 //

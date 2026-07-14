@@ -12,7 +12,10 @@ import { verifyAdReward } from '../services/ad.service.js';
 export const claimAdReward = asyncHandler(async (req, res) => {
   const verdict = verifyAdReward({ token: req.body?.token, signature: req.body?.signature });
   if (!verdict.ok) {
-    throw ApiError.forbidden('Ad reward could not be verified', verdict.reason || 'AD_VERIFICATION_FAILED');
+    throw ApiError.forbidden(
+      'Ad reward could not be verified',
+      verdict.reason || 'AD_VERIFICATION_FAILED'
+    );
   }
 
   const result = await grantAdCredit(req.user);

@@ -37,20 +37,50 @@ async function toPcm16kMono(inputBuffer) {
   await writeFile(inFile, inputBuffer);
   try {
     await new Promise((resolve, reject) => {
-      const args = ['-y', '-i', inFile, '-ar', '16000', '-ac', '1', '-f', 's16le', '-acodec', 'pcm_s16le', outFile];
+      const args = [
+        '-y',
+        '-i',
+        inFile,
+        '-ar',
+        '16000',
+        '-ac',
+        '1',
+        '-f',
+        's16le',
+        '-acodec',
+        'pcm_s16le',
+        outFile,
+      ];
       const proc = spawn(bin, args);
       let err = '';
       let settled = false;
-      const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(killTimer); fn(arg); } };
+      const done = (fn, arg) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(killTimer);
+          fn(arg);
+        }
+      };
       // Bound transcode time and hard-kill a stuck ffmpeg so it can't pin a worker.
       const killTimer = setTimeout(() => {
         proc.kill('SIGKILL');
         done(reject, new Error(`ffmpeg transcode timed out after ${config.externalTimeoutMs}ms`));
       }, config.externalTimeoutMs);
       if (typeof killTimer.unref === 'function') killTimer.unref();
-      proc.stderr.on('data', (d) => { err += d.toString(); });
-      proc.on('error', (e) => done(reject, new Error(`ffmpeg not runnable (${e.message}). Install ffmpeg-static or system ffmpeg.`)));
-      proc.on('close', (code) => (code === 0 ? done(resolve) : done(reject, new Error('ffmpeg transcode failed: ' + err.slice(-400)))));
+      proc.stderr.on('data', (d) => {
+        err += d.toString();
+      });
+      proc.on('error', (e) =>
+        done(
+          reject,
+          new Error(`ffmpeg not runnable (${e.message}). Install ffmpeg-static or system ffmpeg.`)
+        )
+      );
+      proc.on('close', (code) =>
+        code === 0
+          ? done(resolve)
+          : done(reject, new Error('ffmpeg transcode failed: ' + err.slice(-400)))
+      );
     });
     return await readFile(outFile);
   } finally {
@@ -109,7 +139,11 @@ export async function assessPronunciation({ audioBuffer, referenceText, targetLa
   } finally {
     // Always release the recognizer, including on timeout (when neither
     // callback fires), so the native handle and push stream can't leak.
-    try { recognizer.close(); } catch { /* already closed */ }
+    try {
+      recognizer.close();
+    } catch {
+      /* already closed */
+    }
   }
 
   const pa = sdk.PronunciationAssessmentResult.fromResult(result);
@@ -152,11 +186,11 @@ function mockAssessment(referenceText) {
     return { word, accuracyScore: score, errorType };
   });
 
-  const avg = (key) =>
-    Math.round((70 + Math.random() * 25) * 10) / 10; // 70-95
-  const overall = Math.round(
-    (wordScores.reduce((s, w) => s + w.accuracyScore, 0) / Math.max(wordScores.length, 1)) * 10
-  ) / 10;
+  const avg = () => Math.round((70 + Math.random() * 25) * 10) / 10; // 70-95
+  const overall =
+    Math.round(
+      (wordScores.reduce((s, w) => s + w.accuracyScore, 0) / Math.max(wordScores.length, 1)) * 10
+    ) / 10;
 
   return {
     transcript: referenceText,
@@ -192,13 +226,14 @@ function buildFeedback({ overall, words }) {
 
   return {
     summary,
-    didWell: strong.length ? `Clear pronunciation on: ${strong.join(', ')}.` : 'Steady overall delivery.',
+    didWell: strong.length
+      ? `Clear pronunciation on: ${strong.join(', ')}.`
+      : 'Steady overall delivery.',
     improve: weak.length
       ? `Work on these words: ${weak.join(', ')}. Try saying each one slowly, then in the sentence.`
       : 'No major problem words — push for smoother flow next.',
   };
 }
-
 
 // Plain speech-to-text (no pronunciation scoring) for the vocab tutor: we only
 // need WHAT the learner said to judge their answer, which is far cheaper than

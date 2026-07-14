@@ -8,7 +8,10 @@ import { getAppSettings } from '../services/settings.service.js';
 export const listSponsored = asyncHandler(async (_req, res) => {
   const { adsEnabled } = await getAppSettings();
   if (!adsEnabled) return res.json({ items: [] });
-  const items = await prisma.sponsoredCard.findMany({ where: { isActive: true }, orderBy: { createdAt: 'desc' } });
+  const items = await prisma.sponsoredCard.findMany({
+    where: { isActive: true },
+    orderBy: { createdAt: 'desc' },
+  });
   res.json({ items });
 });
 
@@ -21,7 +24,14 @@ export const listAllSponsored = asyncHandler(async (_req, res) => {
 export const createSponsored = asyncHandler(async (req, res) => {
   const { advertiser, title, body, ctaText, ctaUrl, imageUrl } = req.body;
   const item = await prisma.sponsoredCard.create({
-    data: { advertiser, title, body, ctaText: ctaText || 'Learn more', ctaUrl, imageUrl: imageUrl || null },
+    data: {
+      advertiser,
+      title,
+      body,
+      ctaText: ctaText || 'Learn more',
+      ctaUrl,
+      imageUrl: imageUrl || null,
+    },
   });
   res.status(201).json(item);
 });

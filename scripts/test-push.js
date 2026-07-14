@@ -31,8 +31,8 @@ import 'dotenv/config';
 import { Expo } from 'expo-server-sdk';
 import { prisma } from '../src/db/prisma.js';
 
-const title = process.argv[2] || "Hello Everyone !";
-const body = process.argv[3] || "Quiz is live now, check it out !";
+const title = process.argv[2] || 'Hello Everyone !';
+const body = process.argv[3] || 'Quiz is live now, check it out !';
 
 const expo = new Expo(
   process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : undefined
@@ -139,8 +139,10 @@ async function main() {
     }
   }
 
-  console.log('\nDone. If receipts are "delivered" but the phone shows nothing,\n' +
-    'check the device\'s per-app notification settings and the "Default" channel.');
+  console.log(
+    '\nDone. If receipts are "delivered" but the phone shows nothing,\n' +
+      'check the device\'s per-app notification settings and the "Default" channel.'
+  );
 }
 
 main()

@@ -58,7 +58,14 @@ export async function runNewsBatch(opts = {}) {
 
   const raw = await provider.fetch({ limit, categories, country, language });
   if (!raw.length) {
-    return { fetched: 0, published: 0, skipped: 0, filtered: 0, provider: provider.name, titles: [] };
+    return {
+      fetched: 0,
+      published: 0,
+      skipped: 0,
+      filtered: 0,
+      provider: provider.name,
+      titles: [],
+    };
   }
 
   const seen = await alreadyPublishedUrls(raw.map((a) => a.url));
@@ -92,7 +99,7 @@ export async function runNewsBatch(opts = {}) {
           // manual/AI cards, so users can learn vocabulary from the news.
           vocab: summary.vocab?.length
             ? {
-               create: summary.vocab.map((v) => ({
+                create: summary.vocab.map((v) => ({
                   nativeLanguage: 'hi',
                   term: v.term,
                   partOfSpeech: v.partOfSpeech,

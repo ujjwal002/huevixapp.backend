@@ -39,8 +39,11 @@ describe('resetPasswordSchema', () => {
     });
     expect(ok.success).toBe(true);
     expect(
-      resetPasswordSchema.body.safeParse({ email: 'a@b.com', code: '12345', newPassword: 'password123' })
-        .success
+      resetPasswordSchema.body.safeParse({
+        email: 'a@b.com',
+        code: '12345',
+        newPassword: 'password123',
+      }).success
     ).toBe(false);
     expect(
       resetPasswordSchema.body.safeParse({ email: 'a@b.com', code: '123456', newPassword: 'short' })

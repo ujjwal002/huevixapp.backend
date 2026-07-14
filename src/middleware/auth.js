@@ -41,10 +41,17 @@ export async function optionalAuth(req, _res, next) {
     if (scheme === 'Bearer' && token) {
       try {
         const payload = verifyAccessToken(token);
-        const user = await prisma.user.findUnique({ where: { id: payload.sub }, include: { subscription: true } });
+        const user = await prisma.user.findUnique({
+          where: { id: payload.sub },
+          include: { subscription: true },
+        });
         if (user) req.user = user;
-      } catch { /* bad token → just treat as guest */ }
+      } catch {
+        /* bad token → just treat as guest */
+      }
     }
     next();
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 }

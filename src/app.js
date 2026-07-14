@@ -14,6 +14,21 @@ import { servePrivacy } from './privacy.js';
 
 import { serveDeleteAccount } from './deleteAccount.js';
 
+// Mask a client IP for logging: keep enough to tell networks apart, drop enough
+// that it's no longer a raw personal identifier. IPv4 (incl. IPv4-mapped IPv6)
+// -> zero the last octet; IPv6 -> keep the first three hextets.
+function anonymizeIp(ip) {
+  if (!ip) return '-';
+  const v4 = ip.includes('.') ? ip.slice(ip.lastIndexOf(':') + 1) : null;
+  if (v4 && /^\d{1,3}(\.\d{1,3}){3}$/.test(v4)) {
+    const parts = v4.split('.');
+    parts[3] = '0';
+    return parts.join('.');
+  }
+  if (ip.includes(':')) return ip.split(':').slice(0, 3).join(':') + '::';
+  return ip;
+}
+
 const app = express();
 
 // Behind cloudflared/ngrok (see setup.md) the socket peer is the tunnel, not
@@ -52,8 +67,13 @@ if (config.env !== 'test') {
     morgan.token('safeurl', (req) =>
       req.originalUrl.replace(/(\/google\/rtdn\/)[^/?#]+/, '$1[REDACTED]')
     );
+    // Anonymize the client IP before it hits disk. Storing full IPs is PII
+    // under India's DPDP Act; masking the last octet (v4) / last 80 bits (v6)
+    // keeps "same network" correlation for debugging without retaining a raw
+    // identifier. Handles IPv4-mapped IPv6 (::ffff:1.2.3.4) too.
+    morgan.token('clientip', (req) => anonymizeIp(req.ip));
     app.use(
-      morgan(':id :remote-addr :method :safeurl :status :res[content-length] - :response-time ms', {
+      morgan(':id :clientip :method :safeurl :status :res[content-length] - :response-time ms', {
         skip: (req) => req.originalUrl === `${config.apiPrefix}/health`,
       })
     );
@@ -88,10 +108,20 @@ app.use(
   express.static(STORAGE_ROOT)
 );
 
-
-
-app.get('/privacy', servePrivacy);
-app.get('/delete-account', serveDeleteAccount);
+// The two public HTML pages are static, script-free, and use only inline
+// <style>. helmet() doesn't set a Content-Security-Policy by default, so add a
+// tight one here: block ALL script (these pages have none), allow the inline
+// styles they ship with, and forbid framing/plugins. Meaningful hardening with
+// zero rendering impact.
+const staticPageCsp = (_req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  );
+  next();
+};
+app.get('/privacy', staticPageCsp, servePrivacy);
+app.get('/delete-account', staticPageCsp, serveDeleteAccount);
 app.use(config.apiPrefix, routes);
 
 app.use(notFoundHandler);

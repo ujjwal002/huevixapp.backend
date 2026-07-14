@@ -1,7 +1,6 @@
 import { prisma } from '../db/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { isSubscriptionActive } from './entitlement.service.js';
-import { synthesizeSpeech } from './tts.service.js';
 import { applyAnswer, freshlyTaught } from './vocabTutor.logic.js';
 
 import { synthesizeWordAudio } from './tts.service.js';
@@ -14,7 +13,11 @@ export async function assertSubscribed(user) {
     u = await prisma.user.findUnique({ where: { id: user.id }, include: { subscription: true } });
   }
   if (!isSubscriptionActive(u)) {
-    throw new ApiError(402, 'The AI vocab tutor is a premium feature. Subscribe to unlock it.', 'PAYWALL');
+    throw new ApiError(
+      402,
+      'The AI vocab tutor is a premium feature. Subscribe to unlock it.',
+      'PAYWALL'
+    );
   }
   return u;
 }

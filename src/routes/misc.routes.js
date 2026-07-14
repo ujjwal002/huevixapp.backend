@@ -9,9 +9,6 @@ import * as notif from '../controllers/notification.controller.js';
 
 import * as gpurchase from '../controllers/googlePurchase.controller.js';
 
-
-
-
 const speakingRouter = Router();
 speakingRouter.use(requireAuth);
 speakingRouter.get('/history', speaking.getSpeakingHistory);

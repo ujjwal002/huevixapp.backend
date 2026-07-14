@@ -7,7 +7,6 @@ import * as gp from '../services/googlePlay.service.js';
 
 import { verifyPubSubPushToken } from '../services/pubsubAuth.service.js';
 
-
 // =============================================================================
 // Google Play purchase verification — the ONLY payment path since the Razorpay
 // migration. Three handlers:
@@ -95,7 +94,10 @@ export const verifyGoogleSubscription = asyncHandler(async (req, res) => {
   const sub = await gp.getSubscription(purchaseToken);
 
   if (!gp.isSubActiveState(sub.subscriptionState)) {
-    throw ApiError.badRequest(`Subscription not active (${sub.subscriptionState})`, 'SUB_NOT_ACTIVE');
+    throw ApiError.badRequest(
+      `Subscription not active (${sub.subscriptionState})`,
+      'SUB_NOT_ACTIVE'
+    );
   }
   const currentPeriodEnd = gp.subscriptionExpiry(sub);
   if (!currentPeriodEnd) throw ApiError.badRequest('Subscription has no expiry', 'NO_EXPIRY');
@@ -124,7 +126,10 @@ export const verifyGoogleSubscription = asyncHandler(async (req, res) => {
     select: { id: true },
   });
   if (claimedBy) {
-    throw ApiError.forbidden('This purchase is already linked to another account', 'TOKEN_ALREADY_USED');
+    throw ApiError.forbidden(
+      'This purchase is already linked to another account',
+      'TOKEN_ALREADY_USED'
+    );
   }
 
   let updated;
@@ -151,7 +156,10 @@ export const verifyGoogleSubscription = asyncHandler(async (req, res) => {
     // Lost the claim race: someone else's row grabbed this token between our
     // check and the upsert. Same outcome as the explicit check above.
     if (e?.code === 'P2002') {
-      throw ApiError.forbidden('This purchase is already linked to another account', 'TOKEN_ALREADY_USED');
+      throw ApiError.forbidden(
+        'This purchase is already linked to another account',
+        'TOKEN_ALREADY_USED'
+      );
     }
     throw e;
   }

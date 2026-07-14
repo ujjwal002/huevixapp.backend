@@ -30,11 +30,7 @@ import { getAppSettings } from '../services/settings.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 import quizRoutes from './quiz.routes.js';
-import {
-  SUPPORTED_LANGUAGES,
-  SUPPORTED_NATIVE_LANGUAGES,
-  config,
-} from '../config/env.js';
+import { SUPPORTED_LANGUAGES, SUPPORTED_NATIVE_LANGUAGES, config } from '../config/env.js';
 
 const router = Router();
 

@@ -1,7 +1,10 @@
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 async function main() {
-  if (await prisma.sponsoredCard.count() > 0) { console.log('Already has sponsored cards'); return; }
+  if ((await prisma.sponsoredCard.count()) > 0) {
+    console.log('Already has sponsored cards');
+    return;
+  }
   await prisma.sponsoredCard.create({
     data: {
       advertiser: 'Huevix Premium',
@@ -14,4 +17,6 @@ async function main() {
   });
   console.log('Seeded house ad ✓');
 }
-main().catch(console.error).finally(() => prisma.$disconnect());
+main()
+  .catch(console.error)
+  .finally(() => prisma.$disconnect());

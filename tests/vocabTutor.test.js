@@ -22,7 +22,11 @@ describe('intervalDaysForStrength', () => {
 
 describe('applyAnswer', () => {
   it('promotes one box on a correct answer and pushes dueAt out', () => {
-    const r = applyAnswer({ strength: 1, timesTested: 2, timesCorrect: 1, consecutiveHits: 1 }, true, NOW);
+    const r = applyAnswer(
+      { strength: 1, timesTested: 2, timesCorrect: 1, consecutiveHits: 1 },
+      true,
+      NOW
+    );
     expect(r.strength).toBe(2);
     expect(r.timesTested).toBe(3);
     expect(r.timesCorrect).toBe(2);
@@ -31,7 +35,11 @@ describe('applyAnswer', () => {
   });
 
   it('drops back to box 0 and due-tomorrow on a miss, and resets the streak', () => {
-    const r = applyAnswer({ strength: 4, timesTested: 9, timesCorrect: 8, consecutiveHits: 5 }, false, NOW);
+    const r = applyAnswer(
+      { strength: 4, timesTested: 9, timesCorrect: 8, consecutiveHits: 5 },
+      false,
+      NOW
+    );
     expect(r.strength).toBe(0);
     expect(r.consecutiveHits).toBe(0);
     expect(r.timesCorrect).toBe(8);

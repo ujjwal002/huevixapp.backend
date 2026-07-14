@@ -3,11 +3,7 @@ import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from '../utils/password.js';
-import {
-  signAccessToken,
-  generateRefreshToken,
-  hashToken,
-} from '../utils/jwt.js';
+import { signAccessToken, generateRefreshToken, hashToken } from '../utils/jwt.js';
 import { issueOtp, verifyOtp } from '../services/email.service.js';
 import { verifyGoogleIdToken } from '../services/googleAuth.service.js';
 
@@ -123,7 +119,10 @@ export const refresh = asyncHandler(async (req, res) => {
       where: { userId: stored.userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    throw ApiError.unauthorized('Refresh token reuse detected; please sign in again', 'REFRESH_REUSE');
+    throw ApiError.unauthorized(
+      'Refresh token reuse detected; please sign in again',
+      'REFRESH_REUSE'
+    );
   }
 
   // Rotate: revoke the used token, issue a new pair.
@@ -170,7 +169,7 @@ export const googleLogin = asyncHandler(async (req, res) => {
       // address could take over the victim's password account.
       if (!g.emailVerified) {
         throw ApiError.forbidden(
-          'This Google account\'s email is unverified; sign in with your password instead.',
+          "This Google account's email is unverified; sign in with your password instead.",
           'GOOGLE_EMAIL_UNVERIFIED'
         );
       }

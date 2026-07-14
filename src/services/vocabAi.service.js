@@ -29,29 +29,81 @@ const WORD_COUNT = 10;
 
 function mockVocab() {
   const base = [
-    { word: 'meticulous', partOfSpeech: 'adjective', meaning: 'showing great attention to detail; very careful', example: 'She was meticulous about checking every figure in the report.' },
-    { word: 'resilient', partOfSpeech: 'adjective', meaning: 'able to recover quickly from difficulties', example: 'The community proved resilient after the floods.' },
-    { word: 'candid', partOfSpeech: 'adjective', meaning: 'honest and straightforward', example: 'He gave a candid account of what went wrong.' },
-    { word: 'alleviate', partOfSpeech: 'verb', meaning: 'to make suffering or a problem less severe', example: 'The new medicine helped alleviate her pain.' },
-    { word: 'inevitable', partOfSpeech: 'adjective', meaning: 'certain to happen; unavoidable', example: 'With no rain for months, a drought seemed inevitable.' },
-    { word: 'pragmatic', partOfSpeech: 'adjective', meaning: 'dealing with things sensibly and realistically', example: 'They took a pragmatic approach to the budget.' },
-    { word: 'diligent', partOfSpeech: 'adjective', meaning: 'hard-working and careful', example: 'A diligent student, she never missed a deadline.' },
-    { word: 'ambiguous', partOfSpeech: 'adjective', meaning: 'open to more than one interpretation; unclear', example: 'His ambiguous reply left everyone confused.' },
-    { word: 'prudent', partOfSpeech: 'adjective', meaning: 'acting with care and thought for the future', example: 'It is prudent to save some money each month.' },
-    { word: 'tenacious', partOfSpeech: 'adjective', meaning: 'holding firmly to a purpose; persistent', example: 'Her tenacious effort finally paid off.' },
+    {
+      word: 'meticulous',
+      partOfSpeech: 'adjective',
+      meaning: 'showing great attention to detail; very careful',
+      example: 'She was meticulous about checking every figure in the report.',
+    },
+    {
+      word: 'resilient',
+      partOfSpeech: 'adjective',
+      meaning: 'able to recover quickly from difficulties',
+      example: 'The community proved resilient after the floods.',
+    },
+    {
+      word: 'candid',
+      partOfSpeech: 'adjective',
+      meaning: 'honest and straightforward',
+      example: 'He gave a candid account of what went wrong.',
+    },
+    {
+      word: 'alleviate',
+      partOfSpeech: 'verb',
+      meaning: 'to make suffering or a problem less severe',
+      example: 'The new medicine helped alleviate her pain.',
+    },
+    {
+      word: 'inevitable',
+      partOfSpeech: 'adjective',
+      meaning: 'certain to happen; unavoidable',
+      example: 'With no rain for months, a drought seemed inevitable.',
+    },
+    {
+      word: 'pragmatic',
+      partOfSpeech: 'adjective',
+      meaning: 'dealing with things sensibly and realistically',
+      example: 'They took a pragmatic approach to the budget.',
+    },
+    {
+      word: 'diligent',
+      partOfSpeech: 'adjective',
+      meaning: 'hard-working and careful',
+      example: 'A diligent student, she never missed a deadline.',
+    },
+    {
+      word: 'ambiguous',
+      partOfSpeech: 'adjective',
+      meaning: 'open to more than one interpretation; unclear',
+      example: 'His ambiguous reply left everyone confused.',
+    },
+    {
+      word: 'prudent',
+      partOfSpeech: 'adjective',
+      meaning: 'acting with care and thought for the future',
+      example: 'It is prudent to save some money each month.',
+    },
+    {
+      word: 'tenacious',
+      partOfSpeech: 'adjective',
+      meaning: 'holding firmly to a purpose; persistent',
+      example: 'Her tenacious effort finally paid off.',
+    },
   ];
   const words = base.map((b) => b.word);
-  return base.map((b, i) => ({
-    ...b,
-    question: {
-      sentence: b.example.replace(new RegExp(b.word, 'i'), '___'),
-      options: buildOptions(b.word, words, i),
-      correctIndex: 0, // fixed up below
-    },
-  })).map((item) => {
-    const idx = item.question.options.indexOf(item.word);
-    return { ...item, question: { ...item.question, correctIndex: idx < 0 ? 0 : idx } };
-  });
+  return base
+    .map((b, i) => ({
+      ...b,
+      question: {
+        sentence: b.example.replace(new RegExp(b.word, 'i'), '___'),
+        options: buildOptions(b.word, words, i),
+        correctIndex: 0, // fixed up below
+      },
+    }))
+    .map((item) => {
+      const idx = item.question.options.indexOf(item.word);
+      return { ...item, question: { ...item.question, correctIndex: idx < 0 ? 0 : idx } };
+    });
 }
 
 // Build 4 options for a word: the word itself + 3 distractors from the set.
@@ -142,7 +194,7 @@ Return STRICT JSON only, no markdown:
 export async function generateDailyVocab({ avoidWords = [] } = {}) {
   if (config.mockExternal || !config.ai.apiKey) return mockVocab();
   try {
-   const { default: OpenAI } = await import('openai');
+    const { default: OpenAI } = await import('openai');
     // Vocab generation returns a lot (10 words + meanings + examples + questions),
     // so it needs a longer timeout than the global default — same lesson as the
     // daily quiz generator.
@@ -158,7 +210,10 @@ export async function generateDailyVocab({ avoidWords = [] } = {}) {
         max_tokens: 3000,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: 'You are a vocabulary teacher. Reply with strict JSON only, no markdown.' },
+          {
+            role: 'system',
+            content: 'You are a vocabulary teacher. Reply with strict JSON only, no markdown.',
+          },
           { role: 'user', content: buildPrompt(avoidWords) },
         ],
       }),

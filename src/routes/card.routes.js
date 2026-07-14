@@ -11,7 +11,7 @@ import {
   completeCardSchema,
   createArticleSchema,
   savedCardsQuerySchema,
-  createAdminArticleSchema
+  createAdminArticleSchema,
 } from '../validators/schemas.js';
 import * as card from '../controllers/card.controller.js';
 import * as speaking from '../controllers/speaking.controller.js';
@@ -55,7 +55,13 @@ router.post(
 
 // --- Admin ---
 router.post('/', requireAuth, requireAdmin, validate(createCardSchema), card.createCard);
-router.post('/generate', requireAuth, requireAdmin, validate(generateCardSchema), card.generateAndCreateCard);
+router.post(
+  '/generate',
+  requireAuth,
+  requireAdmin,
+  validate(generateCardSchema),
+  card.generateAndCreateCard
+);
 
 // after the existing audio `upload` multer:
 const imageUpload = multer({
@@ -70,7 +76,8 @@ const imageUpload = multer({
 // in the Admin section (multer must run before validate):
 router.post(
   '/article',
-  requireAuth, requireAdmin,
+  requireAuth,
+  requireAdmin,
   imageUpload.single('image'),
   validate(createArticleSchema),
   card.createArticleFromNews

@@ -40,7 +40,8 @@ export const approvePromo = asyncHandler(async (req, res) => {
 export const rejectPromo = asyncHandler(async (req, res) => {
   const promo = await prisma.startupPromo.findUnique({ where: { id: req.params.id } });
   if (!promo) throw ApiError.notFound('Promo not found');
-  if (promo.status !== 'PENDING_REVIEW') throw ApiError.badRequest('Only a pending promo can be rejected');
+  if (promo.status !== 'PENDING_REVIEW')
+    throw ApiError.badRequest('Only a pending promo can be rejected');
 
   let refundId = null;
   if (promo.razorpayPaymentId) {
@@ -53,7 +54,6 @@ export const rejectPromo = asyncHandler(async (req, res) => {
   });
   res.json(updated);
 });
-
 
 // ---------------------- Feed serving + tracking --------------------------
 
@@ -70,7 +70,15 @@ function shuffle(arr) {
 export const listActivePromos = asyncHandler(async (_req, res) => {
   const items = await prisma.startupPromo.findMany({
     where: { status: 'ACTIVE', expiresAt: { gt: new Date() } },
-    select: { id: true, startupName: true, title: true, body: true, ctaText: true, ctaUrl: true, imageUrl: true },
+    select: {
+      id: true,
+      startupName: true,
+      title: true,
+      body: true,
+      ctaText: true,
+      ctaUrl: true,
+      imageUrl: true,
+    },
     take: 25,
   });
   res.json({ items: shuffle(items) });
@@ -151,15 +159,27 @@ export const deletePromo = asyncHandler(async (req, res) => {
   const promo = await prisma.startupPromo.findUnique({ where: { id: req.params.id } });
   if (!promo || promo.ownerId !== req.user.id) throw ApiError.notFound('Promo not found');
 
-  const ended = promo.status === 'ACTIVE' && !!promo.expiresAt && promo.expiresAt.getTime() <= Date.now();
-  const removable = promo.status === 'PENDING_PAYMENT' || promo.status === 'REJECTED' || promo.status === 'EXPIRED' || ended;
-  if (!removable) throw ApiError.badRequest("Can't remove a promotion while it's pending review or live");
+  const ended =
+    promo.status === 'ACTIVE' && !!promo.expiresAt && promo.expiresAt.getTime() <= Date.now();
+  const removable =
+    promo.status === 'PENDING_PAYMENT' ||
+    promo.status === 'REJECTED' ||
+    promo.status === 'EXPIRED' ||
+    ended;
+  if (!removable)
+    throw ApiError.badRequest("Can't remove a promotion while it's pending review or live");
 
   await prisma.startupPromo.delete({ where: { id: promo.id } });
   res.json({ ok: true });
 });
 
-const PROMO_DAYS = { promote_1day: 1, promote_3day: 3, promote_7day: 7, promote_14day: 14, promote_30day: 30 };
+const PROMO_DAYS = {
+  promote_1day: 1,
+  promote_3day: 3,
+  promote_7day: 7,
+  promote_14day: 14,
+  promote_30day: 30,
+};
 
 // POST /promos/google — create a draft promo for Google Play (no Razorpay order).
 export const createPromoGoogle = asyncHandler(async (req, res) => {
@@ -172,14 +192,26 @@ export const createPromoGoogle = asyncHandler(async (req, res) => {
   const promo = await prisma.startupPromo.create({
     data: {
       ownerId: req.user.id,
-      startupName, title, body,
-      ctaUrl, ctaText: ctaText || 'Visit',
+      startupName,
+      title,
+      body,
+      ctaUrl,
+      ctaText: ctaText || 'Visit',
       imageUrl: imageUrl || null,
-      days: nDays, amountPaise, status: 'PENDING_PAYMENT',
+      days: nDays,
+      amountPaise,
+      status: 'PENDING_PAYMENT',
     },
   });
 
-  res.status(201).json({ promoId: promo.id, productId, days: nDays, amountInr: config.pricing.promoPerDayInr * nDays });
+  res
+    .status(201)
+    .json({
+      promoId: promo.id,
+      productId,
+      days: nDays,
+      amountInr: config.pricing.promoPerDayInr * nDays,
+    });
 });
 
 // POST /promos/:id/confirm-google — verify the Google Play purchase, send to review.
@@ -191,7 +223,8 @@ export const confirmPromoGoogle = asyncHandler(async (req, res) => {
 
   const days = PROMO_DAYS[productId];
   if (!days) throw ApiError.badRequest('Unknown promote product', 'UNKNOWN_PRODUCT');
-  if (days !== promo.days) throw ApiError.badRequest('Product does not match promo duration', 'DURATION_MISMATCH');
+  if (days !== promo.days)
+    throw ApiError.badRequest('Product does not match promo duration', 'DURATION_MISMATCH');
 
   const product = await gp.getProduct(productId, purchaseToken);
   if (product.purchaseState !== gp.PRODUCT_PURCHASED) {

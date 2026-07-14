@@ -61,7 +61,9 @@ describe('generateQuizQuestions (mock mode)', () => {
 
 describe('submitAnswerSchema', () => {
   it('accepts a valid answer', () => {
-    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: 2 }).success).toBe(true);
+    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: 2 }).success).toBe(
+      true
+    );
   });
 
   it('rejects a missing questionId', () => {
@@ -69,9 +71,15 @@ describe('submitAnswerSchema', () => {
   });
 
   it('rejects an out-of-range or non-integer choice', () => {
-    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: -1 }).success).toBe(false);
-    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: 10 }).success).toBe(false);
-    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: 1.5 }).success).toBe(false);
+    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: -1 }).success).toBe(
+      false
+    );
+    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: 10 }).success).toBe(
+      false
+    );
+    expect(submitAnswerSchema.body.safeParse({ questionId: 'q1', chosenIndex: 1.5 }).success).toBe(
+      false
+    );
   });
 });
 
@@ -90,7 +98,10 @@ describe('leaderboardQuerySchema', () => {
 
 describe('winnerAcceptSchema', () => {
   it('accepts a phone, with an optional preferred role', () => {
-    expect(winnerAcceptSchema.body.safeParse({ contactPhone: '9876543210', preferredRole: 'Writer' }).success).toBe(true);
+    expect(
+      winnerAcceptSchema.body.safeParse({ contactPhone: '9876543210', preferredRole: 'Writer' })
+        .success
+    ).toBe(true);
     expect(winnerAcceptSchema.body.safeParse({ contactPhone: '9876543210' }).success).toBe(true);
   });
 

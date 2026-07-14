@@ -36,7 +36,9 @@ async function main() {
     },
   });
 
-  const existing = await prisma.card.findFirst({ where: { title: 'Nailing the First Impression' } });
+  const existing = await prisma.card.findFirst({
+    where: { title: 'Nailing the First Impression' },
+  });
   if (!existing) {
     await prisma.card.create({
       data: {
@@ -44,17 +46,40 @@ async function main() {
         level: 'INTERMEDIATE',
         topic: 'interview',
         title: 'Nailing the First Impression',
-        body:
-          'In a job interview, the first few minutes are crucial. Recruiters often form an impression before you even sit down. Maintain steady eye contact, offer a firm handshake, and articulate your strengths with concrete examples. Avoid vague statements; instead, quantify your achievements. Preparation conveys confidence, and confidence is contagious.',
+        body: 'In a job interview, the first few minutes are crucial. Recruiters often form an impression before you even sit down. Maintain steady eye contact, offer a firm handshake, and articulate your strengths with concrete examples. Avoid vague statements; instead, quantify your achievements. Preparation conveys confidence, and confidence is contagious.',
         wordCount: 52,
         isPublished: true,
         audioStatus: 'PENDING',
         vocab: {
           create: [
-            { nativeLanguage: 'hi', term: 'crucial', partOfSpeech: 'adjective', meaning: 'अत्यंत महत्वपूर्ण', example: 'These minutes are crucial.' },
-            { nativeLanguage: 'hi', term: 'articulate', partOfSpeech: 'verb', meaning: 'स्पष्ट रूप से व्यक्त करना', example: 'Articulate your strengths.' },
-            { nativeLanguage: 'hi', term: 'quantify', partOfSpeech: 'verb', meaning: 'संख्या में मापना', example: 'Quantify your achievements.' },
-            { nativeLanguage: 'hi', term: 'contagious', partOfSpeech: 'adjective', meaning: 'आसानी से फैलने वाला', example: 'Confidence is contagious.' },
+            {
+              nativeLanguage: 'hi',
+              term: 'crucial',
+              partOfSpeech: 'adjective',
+              meaning: 'अत्यंत महत्वपूर्ण',
+              example: 'These minutes are crucial.',
+            },
+            {
+              nativeLanguage: 'hi',
+              term: 'articulate',
+              partOfSpeech: 'verb',
+              meaning: 'स्पष्ट रूप से व्यक्त करना',
+              example: 'Articulate your strengths.',
+            },
+            {
+              nativeLanguage: 'hi',
+              term: 'quantify',
+              partOfSpeech: 'verb',
+              meaning: 'संख्या में मापना',
+              example: 'Quantify your achievements.',
+            },
+            {
+              nativeLanguage: 'hi',
+              term: 'contagious',
+              partOfSpeech: 'adjective',
+              meaning: 'आसानी से फैलने वाला',
+              example: 'Confidence is contagious.',
+            },
           ],
         },
       },

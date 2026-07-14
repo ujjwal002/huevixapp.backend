@@ -35,10 +35,22 @@ async function s3Client() {
 // Minimal ext -> content-type map so S3 serves audio/images with the right type
 // (the browser needs it to play <audio> / render <img>).
 const MIME = {
-  mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'audio/mp4', wav: 'audio/wav',
-  webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg', aac: 'audio/aac',
-  flac: 'audio/flac', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-  webp: 'image/webp', gif: 'image/gif', heic: 'image/heic', txt: 'text/plain',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  mp4: 'audio/mp4',
+  wav: 'audio/wav',
+  webm: 'audio/webm',
+  ogg: 'audio/ogg',
+  opus: 'audio/ogg',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  heic: 'image/heic',
+  txt: 'text/plain',
 };
 function contentTypeFor(ext) {
   return MIME[(ext || '').toLowerCase()] || 'application/octet-stream';

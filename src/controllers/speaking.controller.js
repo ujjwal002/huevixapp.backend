@@ -3,12 +3,12 @@ import { config } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { assessPronunciation } from '../services/speech.service.js';
-import { saveBuffer, resolveLocalPath, getPresignedDownloadUrl } from '../services/storage.service.js';
 import {
-  getSpeakingAccess,
-  reserveCredit,
-  refundCredit,
-} from '../services/entitlement.service.js';
+  saveBuffer,
+  resolveLocalPath,
+  getPresignedDownloadUrl,
+} from '../services/storage.service.js';
+import { getSpeakingAccess, reserveCredit, refundCredit } from '../services/entitlement.service.js';
 import { touchStreak } from '../services/streak.service.js';
 
 // Build the authenticated URL the client uses to play a recording back. The
@@ -47,7 +47,8 @@ export const submitSpeaking = asyncHandler(async (req, res) => {
   if (!reserved) {
     const recheck = await getSpeakingAccess(req.user);
     throw ApiError.payment(
-      recheck.message || 'Your free speaking attempts are used up. Subscribe to keep practising speaking.',
+      recheck.message ||
+        'Your free speaking attempts are used up. Subscribe to keep practising speaking.',
       recheck.reason || 'PAYWALL'
     );
   }

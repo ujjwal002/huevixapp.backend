@@ -26,6 +26,11 @@ router.get('/admin', requireAdmin, tutor.adminList);
 router.post('/admin/:id/approve', requireAdmin, validate(tutorIdParam), tutor.adminApprove);
 router.post('/admin/:id/reject', requireAdmin, validate(tutorRejectSchema), tutor.adminReject);
 router.post('/admin/:id/suspend', requireAdmin, validate(tutorIdParam), tutor.adminSuspend);
-router.post('/admin/:id/payouts', requireAdmin, validate(tutorPayoutSchema), tutor.adminRecordPayout);
+router.post(
+  '/admin/:id/payouts',
+  requireAdmin,
+  validate(tutorPayoutSchema),
+  tutor.adminRecordPayout
+);
 
 export default router;

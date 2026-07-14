@@ -75,7 +75,14 @@ export const startSession = asyncHandler(async (req, res) => {
       })
     ).text;
     const ai = await renderTurn([closing], null);
-    return res.json({ sessionId: session.id, phase: 'done', done: true, alreadyDone: true, expects: 'done', ai });
+    return res.json({
+      sessionId: session.id,
+      phase: 'done',
+      done: true,
+      alreadyDone: true,
+      expects: 'done',
+      ai,
+    });
   }
 
   if (!session) {
@@ -126,7 +133,8 @@ export const turn = asyncHandler(async (req, res) => {
   const session = await prisma.vocabTutorSession.findUnique({
     where: { userId_day: { userId, day } },
   });
-  if (!session) throw ApiError.badRequest('No active tutor session today. Call /start first.', 'NO_SESSION');
+  if (!session)
+    throw ApiError.badRequest('No active tutor session today. Call /start first.', 'NO_SESSION');
   if (session.endedAt) return res.json({ phase: 'done', done: true, alreadyDone: true });
 
   const state = session.state;
@@ -139,11 +147,19 @@ export const turn = asyncHandler(async (req, res) => {
   const counters = { quizzed: 0, correct: 0, taught: 0 };
 
   if (state.phase === 'quiz' && step.expects === 'answer') {
-    if (!req.file) throw ApiError.badRequest('Expected an audio answer (field "audio")', 'AUDIO_REQUIRED');
+    if (!req.file)
+      throw ApiError.badRequest('Expected an audio answer (field "audio")', 'AUDIO_REQUIRED');
     const item = state.quiz[state.qi];
     const word = await getWord(item.wordId);
-    const { text: transcript } = await transcribeOnce({ audioBuffer: req.file.buffer, locale: 'hi-IN' });
-    const { correct, text } = await judgeAndReact({ word, answer: transcript, attemptsSoFar: item.attempts });
+    const { text: transcript } = await transcribeOnce({
+      audioBuffer: req.file.buffer,
+      locale: 'hi-IN',
+    });
+    const { correct, text } = await judgeAndReact({
+      word,
+      answer: transcript,
+      attemptsSoFar: item.attempts,
+    });
     reactionText = text;
     const outcome = quizOutcome(item.attempts, correct);
     item.attempts += 1;
@@ -181,7 +197,9 @@ export const turn = asyncHandler(async (req, res) => {
     next = currentStep(state);
     done = next.expects === 'done';
     const nextWord = done ? null : await getWord(next.wordId);
-    parts.push(done ? await promptText(next, null, stats) : await promptText(next, nextWord, stats));
+    parts.push(
+      done ? await promptText(next, null, stats) : await promptText(next, nextWord, stats)
+    );
     if (!done && (next.kind === 'ask' || next.kind === 'teach')) audioWord = nextWord;
   }
 
@@ -234,7 +252,11 @@ export const status = asyncHandler(async (req, res) => {
     todayStarted: !!session,
     todayDone: !!session?.endedAt,
     today: session
-      ? { taught: session.taughtCount, quizzed: session.quizzedCount, correct: session.correctCount }
+      ? {
+          taught: session.taughtCount,
+          quizzed: session.quizzedCount,
+          correct: session.correctCount,
+        }
       : null,
   });
 });

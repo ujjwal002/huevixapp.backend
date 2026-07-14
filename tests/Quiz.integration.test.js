@@ -51,13 +51,25 @@ run('quiz DB flows (integration)', () => {
     await prisma.quizMonthlyScore.deleteMany({});
     await prisma.monthlyWinner.deleteMany({});
     // Remove the test users (cascades clear any leftover quiz rows).
-    await prisma.user.deleteMany({ where: { email: { in: ['quiz_t1@test.local', 'quiz_t2@test.local'] } } });
+    await prisma.user.deleteMany({
+      where: { email: { in: ['quiz_t1@test.local', 'quiz_t2@test.local'] } },
+    });
 
     const u1 = await prisma.user.create({
-      data: { email: 'quiz_t1@test.local', passwordHash: 'x', name: 'Tester One', targetLanguage: 'en' },
+      data: {
+        email: 'quiz_t1@test.local',
+        passwordHash: 'x',
+        name: 'Tester One',
+        targetLanguage: 'en',
+      },
     });
     const u2 = await prisma.user.create({
-      data: { email: 'quiz_t2@test.local', passwordHash: 'x', name: 'Tester Two', targetLanguage: 'en' },
+      data: {
+        email: 'quiz_t2@test.local',
+        passwordHash: 'x',
+        name: 'Tester Two',
+        targetLanguage: 'en',
+      },
     });
     userId = u1.id;
     user2Id = u2.id;

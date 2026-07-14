@@ -63,7 +63,7 @@ export const getStats = asyncHandler(async (req, res) => {
 
 export const getLeaderboard = asyncHandler(async (req, res) => {
   const top = await prisma.user.findMany({
-    where: { role: { not: 'ADMIN' } },        // <-- hide admin accounts
+    where: { role: { not: 'ADMIN' } }, // <-- hide admin accounts
     orderBy: [{ longestStreak: 'desc' }, { currentStreak: 'desc' }],
     take: 5,
     select: { id: true, name: true, currentStreak: true, longestStreak: true },
@@ -115,7 +115,10 @@ export const deleteMe = asyncHandler(async (req, res) => {
     if (!ok) throw ApiError.unauthorized('Password is incorrect', 'BAD_PASSWORD');
   } else {
     if (!googleIdToken) {
-      throw ApiError.badRequest('Confirm with Google sign-in to delete this account', 'GOOGLE_CONFIRM_REQUIRED');
+      throw ApiError.badRequest(
+        'Confirm with Google sign-in to delete this account',
+        'GOOGLE_CONFIRM_REQUIRED'
+      );
     }
     const g = await verifyGoogleIdToken(googleIdToken);
     if (g.googleId !== req.user.googleId) {
@@ -142,7 +145,13 @@ export const deleteMe = asyncHandler(async (req, res) => {
     await cancelRecurringSubscription(req.user.subscription.providerRefId).catch(() => {});
   }
 
-  // 3) Delete the user. FK cascades remove every owned row atomically.
+  // 3) Delete the user. FK cascades remove every owned row atomically —
+  //    including RefreshToken (onDelete: Cascade), so all sessions die here.
+  //    Any still-valid access token (stateless, ≤15m) is also dead in practice:
+  //    requireAuth re-loads the user on every request and 401s once it's gone.
+  //    NOTE: if this is ever changed to a SOFT delete, add an explicit
+  //    refreshToken.updateMany({ revokedAt }) here — the cascade is what kills
+  //    sessions today.
   await prisma.user.delete({ where: { id: userId } });
 
   // 4) Best-effort purge of the now-orphaned storage objects.

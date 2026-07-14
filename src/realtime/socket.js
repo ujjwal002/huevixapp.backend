@@ -90,7 +90,9 @@ export function initRealtime(httpServer) {
 
   io.on('connection', (socket) => {
     addPresence(socket.data.userId, socket.id);
-    console.log(`[rt] CONNECT  user=${socket.data.userId} (${socket.data.name})  online=${onlineCount()}`);
+    console.log(
+      `[rt] CONNECT  user=${socket.data.userId} (${socket.data.name})  online=${onlineCount()}`
+    );
 
     registerMatchmaking(io, socket);
     registerSignaling(io, socket);

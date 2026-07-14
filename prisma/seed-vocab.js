@@ -4,7 +4,9 @@ import path from 'node:path';
 import 'dotenv/config';
 
 const prisma = new PrismaClient();
-const words = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'prisma', 'vocab-words.json'), 'utf8'));
+const words = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), 'prisma', 'vocab-words.json'), 'utf8')
+);
 const MODEL = process.env.AI_MODEL || 'gpt-4o-mini';
 
 async function enrichLadder(batch) {
@@ -19,7 +21,10 @@ Return ONLY the JSON object.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
     body: JSON.stringify({
       model: MODEL,
       messages: [{ role: 'user', content: prompt }],
@@ -37,29 +42,43 @@ async function main() {
   const ladders = {};
   for (const w of words) (ladders[w.ladder] ||= []).push(w);
 
-  for (const num of Object.keys(ladders).map(Number).sort((a, b) => a - b)) {
+  for (const num of Object.keys(ladders)
+    .map(Number)
+    .sort((a, b) => a - b)) {
     const batch = ladders[num];
     const done = await prisma.vocabWord.count({
       where: { word: { in: batch.map((b) => b.word) }, translation: { not: null } },
     });
-    if (done === batch.length) { console.log(`Ladder ${num}: already done ✓`); continue; }
+    if (done === batch.length) {
+      console.log(`Ladder ${num}: already done ✓`);
+      continue;
+    }
 
     console.log(`Ladder ${num}: generating explanations for ${batch.length} words…`);
     let enriched = [];
-    try { enriched = await enrichLadder(batch); }
-    catch (e) { console.error(`Ladder ${num} failed: ${e.message} — will retry on next run`); continue; }
+    try {
+      enriched = await enrichLadder(batch);
+    } catch (e) {
+      console.error(`Ladder ${num} failed: ${e.message} — will retry on next run`);
+      continue;
+    }
 
     const byWord = new Map(enriched.map((e) => [String(e.word || '').toLowerCase(), e]));
     for (const w of batch) {
       const e = byWord.get(w.word) || {};
       const data = {
-        rank: w.rank, ladder: w.ladder,
+        rank: w.rank,
+        ladder: w.ladder,
         partOfSpeech: e.partOfSpeech || null,
         meaning: e.meaning || w.word,
         translation: e.translation || null,
         example: e.example || null,
       };
-      await prisma.vocabWord.upsert({ where: { word: w.word }, create: { word: w.word, ...data }, update: data });
+      await prisma.vocabWord.upsert({
+        where: { word: w.word },
+        create: { word: w.word, ...data },
+        update: data,
+      });
     }
     console.log(`Ladder ${num}: done ✓`);
     await new Promise((r) => setTimeout(r, 400)); // gentle pacing
@@ -67,4 +86,6 @@ async function main() {
   console.log('🎉 Vocab seeding complete.');
 }
 
-main().catch(console.error).finally(() => prisma.$disconnect());
+main()
+  .catch(console.error)
+  .finally(() => prisma.$disconnect());

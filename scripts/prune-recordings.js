@@ -21,7 +21,9 @@ const BATCH = Number(process.env.PRUNE_BATCH || 500);
 
 async function main() {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  console.log(`Pruning recordings older than ${RETENTION_DAYS} days (before ${cutoff.toISOString()})`);
+  console.log(
+    `Pruning recordings older than ${RETENTION_DAYS} days (before ${cutoff.toISOString()})`
+  );
 
   let totalDeleted = 0;
   // Loop in batches so a large backlog doesn't load everything into memory.

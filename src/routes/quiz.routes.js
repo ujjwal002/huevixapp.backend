@@ -30,7 +30,12 @@ router.post('/winner/accept', validate(winnerAcceptSchema), quiz.acceptOffer);
 
 // --- admin ---
 router.post('/admin/generate', requireAdmin, validate(adminGenerateSchema), quiz.adminGenerate);
-router.post('/admin/select-winner', requireAdmin, validate(adminSelectWinnerSchema), quiz.adminSelectWinner);
+router.post(
+  '/admin/select-winner',
+  requireAdmin,
+  validate(adminSelectWinnerSchema),
+  quiz.adminSelectWinner
+);
 router.get('/admin/winners', requireAdmin, quiz.adminListWinners);
 router.post('/admin/winners/:id/approve', requireAdmin, validate(idParam), quiz.adminApproveWinner);
 router.patch(

@@ -23,7 +23,13 @@ router.post('/logout', auth.logout);
 
 // Email verification (auth: we know who's asking; codes go to their own email)
 router.post('/email/verify/request', requireAuth, emailLimiter, auth.requestEmailVerification);
-router.post('/email/verify/confirm', requireAuth, authLimiter, validate(verifyEmailSchema), auth.confirmEmailVerification);
+router.post(
+  '/email/verify/confirm',
+  requireAuth,
+  authLimiter,
+  validate(verifyEmailSchema),
+  auth.confirmEmailVerification
+);
 
 // Password reset (unauthenticated by nature; heavily rate-limited)
 router.post('/password/forgot', emailLimiter, validate(forgotPasswordSchema), auth.forgotPassword);

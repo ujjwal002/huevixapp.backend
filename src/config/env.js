@@ -112,13 +112,11 @@ export const config = {
     maxTurnsPerSession: int(process.env.TUTOR_MAX_TURNS, 80),
   },
 
-
-    elevenLabs: {
+  elevenLabs: {
     apiKey: process.env.ELEVENLABS_API_KEY || null,
     voiceId: process.env.ELEVENLABS_VOICE_ID || null,
     modelId: process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2',
   },
-
 
   storage: {
     driver: STORAGE_DRIVER, // 'local' | 's3'  — the one switch
@@ -222,7 +220,10 @@ export const config = {
       .map((s) => s.trim())
       .filter(Boolean),
     turnStaticSecret: process.env.TURN_STATIC_SECRET || null,
-    turnCredentialTtlSec: int(process.env.TURN_CRED_TTL_SECONDS, 86_400),
+    // TURN REST credentials are handed to the client, so keep the window short:
+    // if one leaks it's only good for ~1h of relay, not a full day. Bump via
+    // TURN_CRED_TTL_SECONDS if a specific network needs longer-lived creds.
+    turnCredentialTtlSec: int(process.env.TURN_CRED_TTL_SECONDS, 3_600),
   },
 
   calls: {
@@ -258,7 +259,9 @@ if (isProd) {
     problems.push('JWT_REFRESH_SECRET is missing or using the insecure dev default');
   }
   if (config.mockExternal) {
-    problems.push('MOCK_EXTERNAL must be false in production (mock skips payment/signature checks)');
+    problems.push(
+      'MOCK_EXTERNAL must be false in production (mock skips payment/signature checks)'
+    );
   }
   if (!config.databaseUrl) {
     problems.push('DATABASE_URL is required');
@@ -279,7 +282,9 @@ if (!['local', 's3'].includes(config.storage.driver)) {
   throw new Error(`Unknown STORAGE_DRIVER "${config.storage.driver}" (expected "local" or "s3")`);
 }
 if (config.storage.driver === 's3' && !config.storage.s3.bucket) {
-  throw new Error('STORAGE_DRIVER=s3 requires S3_BUCKET (set it plus AWS credentials before switching)');
+  throw new Error(
+    'STORAGE_DRIVER=s3 requires S3_BUCKET (set it plus AWS credentials before switching)'
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,6 @@
 import { prisma } from '../db/prisma.js';
-import { startOfUtcDay, isSameUtcDay } from '../utils/dates.js';
+import { startOfUtcDay } from '../utils/dates.js';
 import { generateDailyVocab, DAILY_VOCAB_WORD_COUNT } from './vocabAi.service.js';
-
-const STREAK_LOOKBACK_DAYS = 60; // how far back to gather "avoid" words
 
 function utcDayStart(d = new Date()) {
   return startOfUtcDay(d);
@@ -50,7 +48,7 @@ export async function getOrCreateTodaySet(targetLanguage = 'en') {
         },
       },
     });
-  } catch (e) {
+  } catch {
     // Likely a concurrent create won the unique race — fall through to re-read.
   }
 
@@ -181,7 +179,7 @@ export async function submitVocabAnswer(user, { wordId, chosenIndex }) {
   return {
     correct,
     correctIndex: word.correctIndex, // safe to reveal now
-    example: word.example,           // reinforce usage after answering
+    example: word.example, // reinforce usage after answering
     completedNow,
     streak,
   };
@@ -216,13 +214,14 @@ export async function getMyVocabStatus(user, targetLanguage = 'en') {
   const yesterday = new Date(today);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
   const last = u?.vocabLastPlayedDate ? utcDayStart(u.vocabLastPlayedDate) : null;
-  const streakAlive = last && (last.getTime() === today.getTime() || last.getTime() === yesterday.getTime());
+  const streakAlive =
+    last && (last.getTime() === today.getTime() || last.getTime() === yesterday.getTime());
 
   return {
     totalWords: set?._count.words ?? DAILY_VOCAB_WORD_COUNT,
     answeredToday,
     completed,
-    streak: streakAlive ? (u?.vocabCurrentStreak || 0) : 0,
+    streak: streakAlive ? u?.vocabCurrentStreak || 0 : 0,
     longestStreak: u?.vocabLongestStreak || 0,
   };
 }
