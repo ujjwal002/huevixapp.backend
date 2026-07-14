@@ -1,188 +1,149 @@
-# Huevix — Backend (v1)
-
-An Inshorts-style daily language-learning API. Each card is a short text the
-learner can **read**, **listen** to, and **speak** — with vocab meanings in their
-own language, daily streaks, a freemium model, and Razorpay subscriptions.
-
-Built so adding a new language is a **config change, not a rewrite**.
-
----
-
-## What's in v1
-
-- **Auth** — email/password register & login, JWT access tokens, rotating refresh tokens.
-- **Cards (read/listen)** — paginated feed filtered to the user's target language; full card with vocab in the user's native language; cached TTS audio.
-- **Speaking (the paid feature)** — upload a recording, get pronunciation scores + per-word "what you did great / wrong" feedback (Azure Pronunciation Assessment).
-- **Freemium entitlements** — free lifetime taste of speaking → paywall → ₹100/mo or ₹999/yr; daily cap for subscribers; rewarded-ad bonus credits.
-- **Streaks** — increment once/day on any qualifying activity.
-- **Subscriptions** — Razorpay order creation, signature verification, webhook.
-- **Admin** — create cards manually or AI-generate them (text + vocab + audio).
-
-Everything runs **out of the box in mock mode** (no external accounts needed).
-
----
-
-## Tech stack
-
-Node.js + Express · PostgreSQL via Prisma · JWT · multer (audio upload) · zod
-(validation). External integrations: Anthropic (content), Azure Speech (TTS +
-pronunciation assessment), Razorpay (payments) — all behind a `MOCK_EXTERNAL`
-flag.
-
----
-
-## Quick start
-
-```bash
-# 1. Install
-npm install
-
-# 2. Configure
-cp .env.example .env        # works as-is in mock mode; set DATABASE_URL
-
-# 3. Database (needs a running PostgreSQL)
-npm run prisma:generate
-npm run prisma:migrate      # creates tables
-npm run seed                # admin + learner + a sample English card
-
-# 4. Run
-npm run dev                 # http://localhost:4000/api/v1
-```
-
-Seeded logins (password `Password123`): `admin@huevix.app`,
-`learner@huevix.app`.
-
-> No PostgreSQL handy? The fastest path is a free hosted Postgres (Neon/Supabase/
-> Railway) — paste its connection string into `DATABASE_URL`.
-
----
-
-## Going live (flip off mock mode)
-
-Set `MOCK_EXTERNAL=false` and provide:
-
-| Feature | Provider | Keys |
-| --- | --- | --- |
-| Card + vocab generation | Anthropic | `ANTHROPIC_API_KEY` |
-| Listening audio (TTS) | Azure Speech | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` |
-| Speaking assessment | Azure Speech | (same keys) |
-| Payments | Razorpay | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` |
-
-Install the optional SDKs when you switch a feature on:
-`npm install microsoft-cognitiveservices-speech-sdk razorpay @anthropic-ai/sdk`
-
-### Storage: local ↔ S3 (one switch)
-
-Storage is selected by a single env var, `STORAGE_DRIVER`:
-
-```bash
-STORAGE_DRIVER=local   # default — writes ./storage, served at /static
-STORAGE_DRIVER=s3      # uploads to S3 instead; nothing else in the code changes
-```
-
-When `STORAGE_DRIVER=s3`, also set:
-
-```bash
-S3_BUCKET=your-bucket
-S3_REGION=ap-south-1                       # or AWS_REGION
-AWS_ACCESS_KEY_ID=...                      # standard AWS creds (or an IAM role)
-AWS_SECRET_ACCESS_KEY=...
-# optional:
-STORAGE_PUBLIC_BASE_URL=https://cdn.example.com   # CloudFront/CDN for public assets
-S3_ENDPOINT=https://...                    # for S3-compatible stores (R2/MinIO)
-S3_FORCE_PATH_STYLE=true                   # usually needed with S3_ENDPOINT
-```
-
-Install the SDKs when you flip it on:
-`npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner`
-
-**Bucket setup (important):** keep the bucket **private**. Public-read access is
-only needed for the `tts/` and `images/` prefixes (TTS audio and article
-images) — grant those via a bucket policy or, preferably, put CloudFront in
-front and point `STORAGE_PUBLIC_BASE_URL` at it. The `recordings/` prefix must
-stay private: the app never exposes it, and serves each recording to its owner
-through a short-lived presigned URL.
-
----
-
-## Adding a new language (the whole job)
-
-1. Add a row to `SUPPORTED_LANGUAGES` in `src/config/env.js` (name, Azure locale, TTS voice).
-2. (Optional) add a native language to `SUPPORTED_NATIVE_LANGUAGES`.
-3. Generate cards for it via `POST /cards/generate`.
-
-No schema changes, no controller changes. That's the design paying off.
-
----
-
 ## API reference (prefix `/api/v1`)
 
+### System
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| GET | `/health` | — | Liveness + mock flag |
-| GET | `/meta` | — | Supported languages, pricing, entitlement rules |
-| POST | `/auth/register` | — | Create account |
-| POST | `/auth/login` | — | Log in |
-| POST | `/auth/refresh` | — | Rotate tokens |
+| GET | `/health` | — | Liveness + DB readiness (503 if Postgres unreachable) |
+| GET | `/meta` | — | Supported languages, pricing, entitlement rules, ad settings |
+
+### Auth
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| POST | `/auth/register` | — | Create account (auto-login) |
+| POST | `/auth/login` | — | Email/password login |
+| POST | `/auth/google` | — | Google Sign-In (verifies ID token) |
+| POST | `/auth/refresh` | — | Rotate tokens (reuse-detected) |
 | POST | `/auth/logout` | — | Revoke a refresh token |
+| POST | `/auth/email/verify/request` | ✓ | (Re)send email verification OTP |
+| POST | `/auth/email/verify/confirm` | ✓ | Confirm email with OTP |
+| POST | `/auth/password/forgot` | — | Send reset OTP (always 200) |
+| POST | `/auth/password/reset` | — | Reset password with OTP |
+
+### Users
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
 | GET | `/users/me` | ✓ | Profile |
 | PATCH | `/users/me` | ✓ | Update name / languages |
+| DELETE | `/users/me` | ✓ | Delete account + all data (re-auth required) |
 | GET | `/users/me/stats` | ✓ | Streak, counts, entitlement summary |
-| GET | `/cards/feed` | ✓ | Daily feed (target-language filtered, paginated) |
-| GET | `/cards/:id` | ✓ | Card + vocab in native language |
+| GET | `/users/leaderboard` | ✓ | Top streaks |
+
+### Cards
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/cards/feed` | opt | Daily feed (unseen-first for logged-in) |
+| GET | `/cards/saved` | ✓ | Saved cards (paginated) |
+| GET | `/cards/:id` | opt | Card + vocab in native language |
 | POST | `/cards/:id/complete` | ✓ | Mark read/listen done → streak |
-| POST | `/cards/:id/speak` | ✓ | **Speaking assessment (gated)** — multipart `audio` |
-| GET | `/speaking/history` | ✓ | Past attempts |
-| POST | `/ads/reward` | ✓ | Claim a rewarded-ad speaking credit |
-| GET | `/subscription` | ✓ | Current subscription |
-| POST | `/subscription/checkout` | ✓ | Create Razorpay order |
-| POST | `/subscription/verify` | ✓ | Activate after payment |
-| POST | `/subscription/webhook` | — | Razorpay events (raw body) |
+| POST | `/cards/:id/seen` | ✓ | Record view (no streak) |
+| POST | `/cards/:id/save` | ✓ | Save a card |
+| DELETE | `/cards/:id/save` | ✓ | Unsave a card |
+| POST | `/cards/:id/speak` | ✓ | Speaking assessment (gated) — multipart `audio` |
 | POST | `/cards` | admin | Create a card manually |
 | POST | `/cards/generate` | admin | AI-generate a card + vocab + audio |
+| POST | `/cards/article` | admin | AI-summarize a news article — multipart `image` |
+| POST | `/cards/admin-article` | admin | Hand-written article card — multipart `image` |
 
-### The speaking flow
+### Speaking
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/speaking/history` | ✓ | Past attempts |
+| GET | `/speaking/recordings/:id` | ✓ | Stream own recording (owner-only) |
 
-```
-client records audio of the user reading the card
-   → POST /cards/:id/speak  (multipart: audio)
-       → entitlement gate (trial → ad credit → subscription → 402 paywall)
-       → assessPronunciation(audio, card.body, targetLanguage)
-       → store attempt + consume credit + update streak
-   ← scores + per-word breakdown + friendly feedback
-```
+### Ads
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/ads/admob-ssv` | — | AdMob server-side-verification callback |
+| POST | `/ads/reward` | ✓ | Claim a rewarded-ad speaking credit |
 
-A `402 PAYMENT_REQUIRED` with code `PAYWALL` is your cue to show the subscribe
-screen. Code `DAILY_LIMIT_REACHED` means a subscriber hit the daily cap.
+### Subscription & purchases (Google Play)
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/subscription` | ✓ | Current subscription |
+| POST | `/subscription/google/verify` | ✓ | Verify & activate a Play subscription |
+| POST | `/subscription/cancel` | ✓ | Cancel (Play manage URL; RTDN is source of truth) |
+| POST | `/purchases/google/verify` | ✓ | Verify a one-time coin pack |
+| POST | `/google/rtdn/:secret` | — | Play Real-time Developer Notifications (secret + OIDC) |
 
----
+### Notifications
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/notifications` | ✓ | Recent notifications + unread count |
+| POST | `/notifications/read` | ✓ | Mark all read |
+| POST | `/notifications/devices` | ✓ | Register a push token |
+| DELETE | `/notifications/devices` | ✓ | Unregister own push token |
 
-## Project structure
+### Practice calls
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/calls/turn-credentials` | ✓ | Short-lived STUN/TURN ICE servers |
+| GET | `/calls/history` | ✓ | Recent calls |
+| GET | `/calls/balance` | ✓ | Coin / free-second balance summary |
+| POST | `/calls/recharge` | ✓ | Recharge call credit (mock/dev) |
+| POST | `/calls/grant-ad-video` | ✓ | Claim rewarded-ad video minutes |
+| POST | `/calls/report` | ✓ | Report a call partner (also blocks) |
+| POST | `/calls/block` | ✓ | Block a user |
+| DELETE | `/calls/block/:userId` | ✓ | Unblock |
+| GET | `/calls/blocks` | ✓ | List blocked users |
 
-```
-src/
-  config/env.js            # config + LANGUAGE REGISTRY (scalability hinge)
-  db/prisma.js             # Prisma client
-  middleware/              # auth, validation, rate limits, errors
-  services/                # ai, tts, speech (assessment), entitlement, streak, payment, storage
-  controllers/             # auth, user, card, speaking, ads, subscription
-  routes/                  # wiring
-  app.js / server.js       # bootstrap
-prisma/schema.prisma       # data model
-prisma/seed.js             # demo data
-```
+### Tutor marketplace
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| POST | `/tutors/apply` | ✓ | Apply to become a tutor (email verified) |
+| GET | `/tutors/me` | ✓ | Application status + earnings + payouts |
+| PATCH | `/tutors/me` | ✓ | Edit profile / toggle online |
+| GET | `/tutors/online` | ✓ | Reachable approved tutors |
+| GET | `/tutors/admin` | admin | List applications (by status) |
+| POST | `/tutors/admin/:id/approve` | admin | Approve tutor |
+| POST | `/tutors/admin/:id/reject` | admin | Reject tutor |
+| POST | `/tutors/admin/:id/suspend` | admin | Suspend tutor |
+| POST | `/tutors/admin/:id/payouts` | admin | Record a manual UPI payout |
 
----
+### Daily quiz
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/quiz/today` | ✓ | Today's quiz (no answers) |
+| POST | `/quiz/answer` | ✓ | Submit an answer |
+| GET | `/quiz/leaderboard` | ✓ | Monthly leaderboard + own rank |
+| GET | `/quiz/me` | ✓ | Quiz streak/status |
+| GET | `/quiz/winner/current` | ✓ | Claimable monthly winner offer |
+| POST | `/quiz/winner/accept` | ✓ | Accept the interview offer |
+| POST | `/quiz/admin/generate` | admin | Generate today's quiz |
+| POST | `/quiz/admin/select-winner` | admin | Select a month's winner |
+| GET | `/quiz/admin/winners` | admin | List winners |
+| POST | `/quiz/admin/winners/:id/approve` | admin | Approve a winner |
+| PATCH | `/quiz/admin/winners/:id` | admin | Update winner status |
+| POST | `/quiz/admin/questions/:id/void` | admin | Void a bad question |
 
-## Notes & next steps
+### Vocab tutor (premium)
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/vocab-tutor/status` | ✓ | Words known, due count, today's session |
+| POST | `/vocab-tutor/start` | ✓ | Start/resume today's session |
+| POST | `/vocab-tutor/turn` | ✓ | Submit a spoken answer / continue — multipart `audio` |
+| POST | `/vocab-tutor/end` | ✓ | End session early |
 
-- **Audio format:** Azure pronunciation assessment expects 16 kHz mono PCM WAV.
-  Have the client record in that format, or transcode (ffmpeg) in
-  `speech.service.js` before assessment.
-- **Ad reward security:** verify rewarded ads via your ad network's server-side
-  callback (e.g. AdMob SSV) before granting credits in production.
-- **Timezone:** streak/day logic is UTC-based; switch to IST in `utils/dates.js`
-  if you want day boundaries at local midnight.
-- **Background jobs:** TTS generation runs inline on card creation for v1; move
-  it to a queue (BullMQ) when content volume grows.
-```
+### Promos & sponsored
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| POST | `/promos/google` | ✓ | Create a draft paid promo |
+| POST | `/promos/:id/confirm-google` | ✓ | Confirm Play purchase → review |
+| GET | `/promos/active` | opt | Live paid promos for the feed |
+| GET | `/promos/mine` | ✓ | Advertiser's own promos + metrics |
+| POST | `/promos/:id/impression` | ✓ | Record a unique view |
+| POST | `/promos/:id/click` | opt | Record a click |
+| DELETE | `/promos/:id` | ✓ | Delete own unpaid/rejected/finished promo |
+| GET | `/promos/admin` | admin | Promos awaiting review |
+| POST | `/promos/admin/:id/approve` | admin | Approve (go live) |
+| POST | `/promos/admin/:id/reject` | admin | Reject + refund |
+| GET | `/sponsored` | — | House sponsored cards |
+| GET | `/sponsored/admin` | admin | All sponsored cards |
+| POST | `/sponsored/admin` | admin | Create sponsored card |
+| PATCH | `/sponsored/admin/:id` | admin | Update sponsored card |
+| DELETE | `/sponsored/admin/:id` | admin | Delete sponsored card |
+
+### Admin settings
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/admin/settings` | admin | Read ad master switch + cadence |
+| PATCH | `/admin/settings` | admin | Flip ads on/off, set cadence |

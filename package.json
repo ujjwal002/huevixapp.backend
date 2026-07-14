@@ -23,7 +23,8 @@
     "format": "prettier --write \"src/**/*.js\" \"prisma/**/*.js\" \"scripts/**/*.js\" \"tests/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"prisma/**/*.js\" \"scripts/**/*.js\" \"tests/**/*.js\"",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1072.0",
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^9.9.0",
     "eslint-config-prettier": "^9.1.0",
     "globals": "^15.9.0",

@@ -204,6 +204,7 @@ model SavedCard {
 
   @@unique([userId, cardId])
   @@index([userId, createdAt])
+  @@index([cardId])
 }
 
 // One row per event (NOT per user). Combined with each user's
@@ -252,6 +253,7 @@ model CardCompletion {
 
   @@unique([userId, cardId])
   @@index([userId])
+  @@index([cardId]) 
 }
 
 model SpeakingAttempt {
@@ -274,6 +276,7 @@ model SpeakingAttempt {
   card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([cardId])   
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +338,7 @@ model VocabProgress {
 
   @@unique([userId, wordId])
   @@index([userId, dueAt])
+  @@index([wordId]) 
 }
 
 model VocabTutorSession {
@@ -548,6 +552,8 @@ model Report {
 
   @@index([reportedUserId, status])
   @@index([status, createdAt])
+  @@index([reporterId])   // add — User-delete cascade; not covered at all
+  @@index([callId])  
 }
 
 model DeviceToken {
@@ -619,6 +625,7 @@ model QuizDailyPlay {
 
   @@unique([userId, quizId])
   @@index([userId])
+  @@index([quizId])
 }
 
 model QuizAnswer {
@@ -635,6 +642,7 @@ model QuizAnswer {
 
   @@unique([userId, questionId])
   @@index([userId, answeredAt])
+  @@index([questionId]) 
 }
 
 model QuizMonthlyScore {
@@ -670,6 +678,7 @@ model MonthlyWinner {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status])
+  @@index([userId])  
 }
 
 
@@ -813,6 +822,7 @@ model VocabSetAnswer {
 
   @@unique([userId, wordId])
   @@index([userId, answeredAt])
+  @@index([wordId])  
 }
 
 model VocabDailyPlay {
@@ -828,4 +838,5 @@ model VocabDailyPlay {
 
   @@unique([userId, setId])
   @@index([userId])
+  @@index([setId])  
 }
