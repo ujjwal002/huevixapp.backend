@@ -36,67 +36,51 @@ const FEED_CARD_SELECT = {
   createdAt: true,
 };
 
+function clampLimit(raw) {
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return 20;
+  return Math.min(50, Math.max(1, n)); // 1..50, default 20
+}
+
+// GET /cards/feed — chronological (newest-first) cursor feed for guests AND
+// logged-in users, so it scrolls "infinitely" until the oldest card. Logged-in
+// responses are annotated with per-user progress + saved for the page only.
 export const getFeed = asyncHandler(async (req, res) => {
-  const { level, cursor, limit } = req.query;
+  const limit = clampLimit(req.query.limit);
+  const cursor = req.query.cursor || null;
+  const { level } = req.query;
+
   const where = {
     targetLanguage: req.user?.targetLanguage || 'en',
     isPublished: true,
     ...(level ? { level } : {}),
   };
+  // Stable, unique ordering is required for cursor paging (id breaks createdAt ties).
+  const orderBy = [{ createdAt: 'desc' }, { id: 'desc' }];
 
-  // --- Guests: simple newest-first cursor pagination (unchanged behavior). ---
+  // Fetch one extra row to know whether another page exists.
+  const rows = await prisma.card.findMany({
+    where,
+    orderBy,
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    select: FEED_CARD_SELECT,
+  });
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.pop();
+  const nextCursor = hasMore ? rows[rows.length - 1].id : null;
+
+  // Guests: no per-user state.
   if (!req.user) {
-    const cards = await prisma.card.findMany({
-      where,
-      // Cursor pagination needs a stable, unique ordering; `id` breaks ties when
-      // two cards share a createdAt (batch-seeded / same-ms AI generation).
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: FEED_CARD_SELECT,
-    });
-    let nextCursor = null;
-    if (cards.length > limit) nextCursor = cards.pop().id;
     return res.json({
-      items: cards.map((c) => ({ ...c, progress: null, saved: false })),
+      items: rows.map((c) => ({ ...c, progress: null, saved: false })),
       nextCursor,
     });
   }
 
-  // --- Logged-in: UNSEEN first, then SEEN as fallback. Instead of pulling a
-  // fixed 500-row pool and splitting it in memory, ask the DB directly:
-  //   unseen = cards with NO completion row for this user (`completions:{none}`)
-  //   seen   = cards that have one (`completions:{some}`) — only used to top up
-  // This reads ~limit rows (a NOT EXISTS / EXISTS subquery over the indexed
-  // CardCompletion), not 500, and surfaces unseen cards even when they're older
-  // than the 500 most recent. The app loads the feed as one batch, so there's
-  // still no cursor. ---
-  const orderBy = [{ createdAt: 'desc' }, { id: 'desc' }];
+  // Logged-in: annotate progress + saved for just this page (<= limit rows).
   const uid = req.user.id;
-
-  const unseen = await prisma.card.findMany({
-    where: { ...where, completions: { none: { userId: uid } } },
-    orderBy,
-    take: limit,
-    select: FEED_CARD_SELECT,
-  });
-
-  // Not enough fresh cards -> top up with the most recent SEEN ones so the feed
-  // is never empty (skips the second query entirely once the user has enough
-  // unseen cards, which is the common case).
-  let ordered = unseen;
-  if (unseen.length < limit) {
-    const seen = await prisma.card.findMany({
-      where: { ...where, completions: { some: { userId: uid } } },
-      orderBy,
-      take: limit - unseen.length,
-      select: FEED_CARD_SELECT,
-    });
-    ordered = [...unseen, ...seen];
-  }
-
-  // Progress + saved state for just the returned set (<= limit rows).
-  const ids = ordered.map((c) => c.id);
+  const ids = rows.map((c) => c.id);
   const [seenRows, savedRows] = await Promise.all([
     prisma.cardCompletion.findMany({
       where: { userId: uid, cardId: { in: ids } },
@@ -111,13 +95,12 @@ export const getFeed = asyncHandler(async (req, res) => {
   const savedSet = new Set(savedRows.map((s) => s.cardId));
 
   res.json({
-    items: ordered.map((c) => ({
+    items: rows.map((c) => ({
       ...c,
       progress: seenMap.get(c.id) || null,
       saved: savedSet.has(c.id),
     })),
-    // Reordered feed is a single bounded batch, not a cursor stream.
-    nextCursor: null,
+    nextCursor,
   });
 });
 

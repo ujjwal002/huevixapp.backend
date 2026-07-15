@@ -245,6 +245,14 @@ export async function submitAnswer(user, { questionId, chosenIndex }) {
     throw e;
   }
 
+   // If this user was referred and just finished a quiz day, check whether they
+  // now hit the 30-day threshold. Best-effort — never affects the quiz reply.
+  if (outcome.completedNow) {
+    onQuizDayCompleted(user.id).catch((e) =>
+      console.error('[referral] qualify failed:', e.message)
+    );
+  }
+
   return {
     correct: outcome.isCorrect,
     correctIndex: question.correctIndex, // safe to reveal AFTER the answer is recorded

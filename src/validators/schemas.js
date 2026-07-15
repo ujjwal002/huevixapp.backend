@@ -44,6 +44,7 @@ export const registerSchema = {
     name: z.string().min(1).max(80).optional(),
     nativeLanguage: nativeEnum.optional(),
     targetLanguage: targetEnum.optional(),
+    referralCode: z.string().trim().min(3).max(16).optional(),
   }),
 };
 
@@ -367,4 +368,22 @@ export const confirmPromoGoogleSchema = {
     productId: z.string().min(1),
     purchaseToken: z.string().min(1),
   }),
+};
+
+// ---- Referrals / payouts ----
+const upiId = z
+  .string()
+  .trim()
+  .regex(/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/, 'Enter a valid UPI ID (e.g. name@bank)');
+
+export const payoutRequestSchema = {
+  body: z.object({ upiId }),
+};
+export const payoutReferenceSchema = {
+  params: z.object({ id: z.string().min(8) }),
+  body: z.object({ reference: z.string().max(140).optional() }),
+};
+export const rejectPayoutSchema = {
+  params: z.object({ id: z.string().min(8) }),
+  body: z.object({ reason: z.string().max(280).optional() }),
 };

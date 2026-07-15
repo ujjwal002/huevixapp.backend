@@ -32,6 +32,8 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import quizRoutes from './quiz.routes.js';
 import { SUPPORTED_LANGUAGES, SUPPORTED_NATIVE_LANGUAGES, config } from '../config/env.js';
 
+import referralRoutes from './referral.routes.js';
+
 const router = Router();
 
 // Liveness + readiness. Pings the database so an orchestrator probe won't route
@@ -102,6 +104,8 @@ router.use('/calls', callsRoutes);
 router.use('/tutors', tutorRoutes);
 
 router.use('/quiz', quizRoutes);
+
+router.use('/referrals', referralRoutes);
 
 // Google Play: one-time credit packs (authed)
 const purchasesRouter = Router();

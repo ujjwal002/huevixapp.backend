@@ -237,6 +237,17 @@ export const config = {
     url: process.env.REDIS_URL || null,
   },
 
+  referral: {
+    rewardPaise: int(process.env.REFERRAL_REWARD_PAISE, 10000), // ₹100 per qualified referral
+    qualifyingDays: int(process.env.REFERRAL_QUALIFYING_DAYS, 30),
+    minQualifiedForPayout: int(process.env.REFERRAL_MIN_QUALIFIED, 100),
+    shareBaseUrl:
+      process.env.REFERRAL_SHARE_BASE_URL ||
+      (process.env.GOOGLE_PLAY_PACKAGE_NAME
+        ? `https://play.google.com/store/apps/details?id=${process.env.GOOGLE_PLAY_PACKAGE_NAME}`
+        : 'https://huevix.com'),
+  },
+
   // Minor fix: default CORS origin now matches the Vite dev frontend (5173)
   // referenced elsewhere in the app, plus the old 3000 default.
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000')

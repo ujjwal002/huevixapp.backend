@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from '../utils/pass
 import { signAccessToken, generateRefreshToken, hashToken } from '../utils/jwt.js';
 import { issueOtp, verifyOtp } from '../services/email.service.js';
 import { verifyGoogleIdToken } from '../services/googleAuth.service.js';
+import { attachReferral } from '../services/referral.service.js';
 
 function publicUser(u) {
   return {
@@ -45,7 +46,7 @@ async function pruneDeadTokens(userId) {
 }
 
 export const register = asyncHandler(async (req, res) => {
-  const { email, password, name, nativeLanguage, targetLanguage } = req.body;
+  const { email, password, name, nativeLanguage, targetLanguage, referralCode } = req.body;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw ApiError.conflict('Email already registered', 'EMAIL_TAKEN');
@@ -60,6 +61,14 @@ export const register = asyncHandler(async (req, res) => {
       freeSpeakingCreditsRemaining: config.entitlement.freeSpeakingTrial,
     },
   });
+
+  // Attribute the signup to a referrer if they came in via a share link.
+  // Best-effort: a bad/duplicate/self code must never block registration.
+  if (referralCode) {
+    attachReferral(user.id, referralCode).catch((e) =>
+      console.error('[referral] attach failed:', e.message)
+    );
+  }
 
   // Kick off email verification. Best-effort: a mail outage must not block
   // signup — the user can hit /auth/email/verify/request to resend.
