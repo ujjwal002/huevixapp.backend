@@ -387,3 +387,22 @@ export const rejectPayoutSchema = {
   params: z.object({ id: z.string().min(8) }),
   body: z.object({ reason: z.string().max(280).optional() }),
 };
+
+
+// ---- Voice (AI conversation) ----
+export const voiceTurnSchema = {
+  body: z.object({
+    sessionId: z.string().min(8),
+    userMs: z.coerce.number().int().min(0).max(60000).optional(),
+    
+  }),
+};
+export const voiceEndSchema = {
+  body: z.object({ sessionId: z.string().min(8) }),
+};
+
+export const voiceStartSchema = {
+  body: z.object({
+    mode: z.enum(['general', 'ielts', 'confidence', 'beginner', 'interview', 'business']).optional(),
+  }),
+};

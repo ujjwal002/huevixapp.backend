@@ -34,6 +34,7 @@ import { SUPPORTED_LANGUAGES, SUPPORTED_NATIVE_LANGUAGES, config } from '../conf
 
 import referralRoutes from './referral.routes.js';
 
+import voiceRoutes from './voice.routes.js';
 const router = Router();
 
 // Liveness + readiness. Pings the database so an orchestrator probe won't route
@@ -106,6 +107,8 @@ router.use('/tutors', tutorRoutes);
 router.use('/quiz', quizRoutes);
 
 router.use('/referrals', referralRoutes);
+
+router.use('/voice', voiceRoutes);
 
 // Google Play: one-time credit packs (authed)
 const purchasesRouter = Router();

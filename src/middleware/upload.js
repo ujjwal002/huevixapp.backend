@@ -39,3 +39,33 @@ export function uploadImage(field = 'image') {
       return next(ApiError.badRequest(err.message || 'Upload failed', 'UPLOAD_ERROR'));
     });
 }
+
+// Shared in-memory audio upload for the voice feature (one short push-to-talk
+// clip per turn). Sarvam STT REST accepts clips up to ~30s; we cap at 6MB.
+export const AUDIO_UPLOAD_MAX_BYTES = 6 * 1024 * 1024;
+
+const audioMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AUDIO_UPLOAD_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    // Mobile records m4a/aac/webm; some clients send octet-stream — allow both.
+    if (file.mimetype.startsWith('audio/') || file.mimetype === 'application/octet-stream') cb(null, true);
+    else cb(new Error('Only audio uploads are allowed'));
+  },
+});
+
+export function uploadAudio(field = 'audio') {
+  const mw = audioMulter.single(field);
+  return (req, res, next) =>
+    mw(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError) {
+        const msg =
+          err.code === 'LIMIT_FILE_SIZE'
+            ? 'Audio clip is too large (max 6MB)'
+            : `Upload error: ${err.message}`;
+        return next(ApiError.badRequest(msg, 'UPLOAD_ERROR'));
+      }
+      return next(ApiError.badRequest(err.message || 'Upload failed', 'UPLOAD_ERROR'));
+    });
+}

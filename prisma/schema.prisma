@@ -148,6 +148,10 @@ model User {
   referralReceived Referral?        @relation("Referred")
   referralPayouts  ReferralPayout[]
 
+  voiceFreeSecUsed     Int            @default(0)
+  voiceFreeSecUsedDate DateTime?
+  voiceSessions        VoiceSession[]
+
   @@index([targetLanguage])
   @@index([longestStreak, currentStreak])
 }
@@ -889,4 +893,53 @@ model ReferralPayout {
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
+}
+
+enum VoiceSessionStatus {
+  ACTIVE
+  ENDED
+}
+
+model VoiceSession {
+  id           String             @id @default(uuid())
+  userId       String
+  status       VoiceSessionStatus @default(ACTIVE)
+  turnCount    Int                @default(0)
+  userAudioSec Int                @default(0)
+  aiAudioSec   Int                @default(0)
+  coinsSpent   Int                @default(0)
+  startedAt    DateTime           @default(now())
+  endedAt      DateTime?
+
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  turns VoiceTurn[]
+
+  mode      String  @default("general")
+  scoreCard Json?
+
+  @@index([userId, startedAt])
+}
+
+model VoiceTurn {
+  id         String   @id @default(uuid())
+  sessionId  String
+  userText   String
+  aiText     String
+  correction String?
+  userSec    Int      @default(0)
+  aiSec      Int      @default(0)
+  coinsSpent Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  session VoiceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+// Global TTS phrase cache: a repeated phrase synthesizes once, then serves free.
+model VoiceTtsCache {
+  hash      String   @id
+  url       String
+  seconds   Int      @default(1)
+  createdAt DateTime @default(now())
 }

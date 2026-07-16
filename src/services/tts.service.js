@@ -28,25 +28,27 @@ export async function synthesizeSpeech({ text, targetLanguage }) {
   speechConfig.speechSynthesisOutputFormat =
     sdk.SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3;
 
-  const audioBuffer = await new Promise((resolve, reject) => {
-    const synthesizer = new sdk.SpeechSynthesizer(speechConfig, null);
-    synthesizer.speakTextAsync(
-      text,
-      (result) => {
-        synthesizer.close();
-        if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
-          resolve(Buffer.from(result.audioData));
-        } else {
-          reject(new Error(`TTS failed: ${result.errorDetails || result.reason}`));
+  const audioBuffer = await withTimeout(
+    new Promise((resolve, reject) => {
+      const synthesizer = new sdk.SpeechSynthesizer(speechConfig, null);
+      synthesizer.speakTextAsync(
+        text,
+        (result) => {
+          synthesizer.close();
+          if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
+            resolve(Buffer.from(result.audioData));
+          } else {
+            reject(new Error(`TTS failed: ${result.errorDetails || result.reason}`));
+          }
+        },
+        (err) => {
+          synthesizer.close();
+          reject(err);
         }
-      },
-      (err) => {
-        synthesizer.close();
-        reject(err);
-      }
-    );
-  });
-
+      );
+    }),
+    { label: 'azure tts' }
+  );
   const { url } = await saveBuffer(audioBuffer, { folder: 'tts', ext: 'mp3' });
   return { url };
 }

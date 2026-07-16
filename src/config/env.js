@@ -204,6 +204,28 @@ export const config = {
     },
   },
 
+  sarvam: {
+    apiKey: process.env.SARVAM_API_KEY || null,
+    sttModel: process.env.SARVAM_STT_MODEL || 'saaras:v3',
+    ttsModel: process.env.SARVAM_TTS_MODEL || 'bulbul:v3',
+    ttsSpeaker: process.env.SARVAM_TTS_SPEAKER || 'anushka', // if a speaker error, try 'shubh' or 'priya'
+    ttsLang: process.env.SARVAM_TTS_LANG || 'en-IN',
+    langCode: process.env.SARVAM_STT_LANG || 'en-IN', // STT hint; 'unknown' to auto-detect Hinglish
+    ttsRate: int(process.env.SARVAM_TTS_RATE, 16000), // 16k = 3x smaller audio than 24k, same speech clarity
+  },
+  voice: {
+    coinsPerSec: int(process.env.VOICE_COINS_PER_SEC, 7),      // 420 coins/min
+    freeDailySec: int(process.env.VOICE_FREE_DAILY_SEC, 120),  // 2 min/day free
+    maxTurnSec: int(process.env.VOICE_MAX_TURN_SEC, 30),       // Sarvam REST clip limit
+    historyTurns: int(process.env.VOICE_HISTORY_TURNS, 6),     // rolling LLM context window
+    brainModel: process.env.VOICE_BRAIN_MODEL || 'gpt-4o-mini',
+  },
+
+  // Kill switch for card TTS (news + article audio). Set TTS_ENABLED=false to
+  // stop all Azure Speech spend; cards publish silently as audioStatus PENDING
+  // and can be backfilled later with scripts/regen-tts.js.
+  ttsEnabled: bool(process.env.TTS_ENABLED, true),
+
   // Realtime practice calling: WebRTC ICE servers + signaling.
   // STUN is free and discovers public addresses; TURN relays media when a
   // direct peer-to-peer path fails (essential on mobile/cellular). coturn runs

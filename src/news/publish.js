@@ -10,6 +10,8 @@ import { isAppropriate } from './filter.js';
 import { synthesizeSpeech } from '../services/tts.service.js';
 import { saveImageFromUrl } from '../services/storage.service.js';
 
+import { config } from '../config/env.js';
+
 function countWords(s) {
   return (s || '').trim().split(/\s+/).filter(Boolean).length;
 }
@@ -17,6 +19,12 @@ function countWords(s) {
 // Generate + attach TTS audio to a card — same behaviour as the card controller,
 // so news articles get the listening feature like every other card.
 async function generateAndAttachAudio(cardId, text, targetLanguage) {
+  // TTS paused (e.g. Azure credit exhausted): publish the card silently and
+  // mark it PENDING so regen-tts.js can backfill audio when re-enabled.
+  if (!config.ttsEnabled) {
+    await prisma.card.update({ where: { id: cardId }, data: { audioStatus: 'PENDING' } });
+    return;
+  }
   try {
     const { url } = await synthesizeSpeech({ text, targetLanguage });
     await prisma.card.update({
@@ -24,7 +32,7 @@ async function generateAndAttachAudio(cardId, text, targetLanguage) {
       data: { audioUrl: url, audioStatus: 'READY' },
     });
   } catch (err) {
-    console.error('[news:TTS] generation failed', err.message);
+    console.error('[TTS] generation failed', err.message);
     await prisma.card.update({
       where: { id: cardId },
       data: { audioStatus: 'FAILED' },
@@ -106,14 +114,14 @@ export async function runNewsBatch(opts = {}) {
           // manual/AI cards, so users can learn vocabulary from the news.
           vocab: summary.vocab?.length
             ? {
-                create: summary.vocab.map((v) => ({
-                  nativeLanguage: 'hi',
-                  term: v.term,
-                  partOfSpeech: v.partOfSpeech,
-                  meaning: v.meaning,
-                  example: v.example,
-                })),
-              }
+              create: summary.vocab.map((v) => ({
+                nativeLanguage: 'hi',
+                term: v.term,
+                partOfSpeech: v.partOfSpeech,
+                meaning: v.meaning,
+                example: v.example,
+              })),
+            }
             : undefined,
         },
       });

@@ -13,6 +13,8 @@ import { summarizeArticle } from '../services/ai.service.js';
 import { adminArticleVocabSchema } from '../validators/schemas.js';
 import { sniffImageExt } from '../utils/imageType.js';
 
+import { config } from '../config/env.js';
+
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -219,17 +221,19 @@ export const generateAndCreateCard = asyncHandler(async (req, res) => {
       isPublished: publish,
       vocab: generated.vocab?.length
         ? {
-            create: generated.vocab.map((v) => ({
-              nativeLanguage,
-              term: v.term,
-              partOfSpeech: v.partOfSpeech,
-              meaning: v.meaning,
-              example: v.example,
-            })),
-          }
+          create: generated.vocab.map((v) => ({
+            nativeLanguage,
+            term: v.term,
+            partOfSpeech: v.partOfSpeech,
+            meaning: v.meaning,
+            example: v.example,
+          })),
+        }
         : undefined,
     },
   });
+
+  console.log(`[AI] generated card ${card.id} with ${generated.vocab?.length || 0} vocab entries`);
 
   await generateAndAttachAudio(card.id, generated.body, targetLanguage);
   if (card.isPublished) await notifyNewCard(card);
@@ -283,14 +287,14 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
       isPublished: publish,
       vocab: summarized.vocab?.length
         ? {
-            create: summarized.vocab.map((v) => ({
-              nativeLanguage,
-              term: v.term,
-              partOfSpeech: v.partOfSpeech,
-              meaning: v.meaning,
-              example: v.example,
-            })),
-          }
+          create: summarized.vocab.map((v) => ({
+            nativeLanguage,
+            term: v.term,
+            partOfSpeech: v.partOfSpeech,
+            meaning: v.meaning,
+            example: v.example,
+          })),
+        }
         : undefined,
     },
   });
@@ -354,14 +358,14 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
       isPublished: publish,
       vocab: vocab.length
         ? {
-            create: vocab.map((v) => ({
-              nativeLanguage,
-              term: v.term,
-              partOfSpeech: v.partOfSpeech,
-              meaning: v.meaning,
-              example: v.example,
-            })),
-          }
+          create: vocab.map((v) => ({
+            nativeLanguage,
+            term: v.term,
+            partOfSpeech: v.partOfSpeech,
+            meaning: v.meaning,
+            example: v.example,
+          })),
+        }
         : undefined,
     },
   });
@@ -377,6 +381,10 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
 async function generateAndAttachAudio(cardId, text, targetLanguage) {
   try {
     const { url } = await synthesizeSpeech({ text, targetLanguage });
+    if (!config.ttsEnabled) {
+      await prisma.card.update({ where: { id: cardId }, data: { audioStatus: 'PENDING' } });
+      return;
+    }
     await prisma.card.update({
       where: { id: cardId },
       data: { audioUrl: url, audioStatus: 'READY' },
