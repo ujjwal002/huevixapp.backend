@@ -25,6 +25,8 @@ import { prisma } from '../db/prisma.js';
 
 import { admobSsv } from '../controllers/admobSsv.controller.js';
 
+import metricsRoutes from './metrics.routes.js';
+
 import { speakingRouter, adsRouter, subRouter, notificationRouter } from './misc.routes.js';
 import { getAppSettings } from '../services/settings.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -109,6 +111,8 @@ router.use('/quiz', quizRoutes);
 router.use('/referrals', referralRoutes);
 
 router.use('/voice', voiceRoutes);
+
+router.use('/admin', metricsRoutes);
 
 // Google Play: one-time credit packs (authed)
 const purchasesRouter = Router();

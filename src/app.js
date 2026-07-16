@@ -15,6 +15,10 @@ import { servePrivacy } from './privacy.js';
 
 import { serveDeleteAccount } from './deleteAccount.js';
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const __appDir = path.dirname(fileURLToPath(import.meta.url));
+
 // Mask a client IP for logging: keep enough to tell networks apart, drop enough
 // that it's no longer a raw personal identifier. IPv4 (incl. IPv4-mapped IPv6)
 // -> zero the last octet; IPv6 -> keep the first three hextets.
@@ -129,6 +133,11 @@ const staticPageCsp = (_req, res, next) => {
 };
 app.get('/privacy', staticPageCsp, servePrivacy);
 app.get('/delete-account', staticPageCsp, serveDeleteAccount);
+// Admin metrics dashboard (page + its two local scripts; DATA endpoint requires admin JWT)
+app.get('/admin', (_req, res) => res.sendFile(path.join(__appDir, 'admin', 'dashboard.html')));
+app.get('/admin/dashboard.js', (_req, res) => res.sendFile(path.join(__appDir, 'admin', 'dashboard.js')));
+app.get('/admin/chart.umd.min.js', (_req, res) => res.sendFile(path.join(__appDir, 'admin', 'chart.umd.min.js')));
+
 app.use(config.apiPrefix, routes);
 
 app.use(notFoundHandler);
