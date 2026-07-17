@@ -52,3 +52,24 @@ console.log(JSON.stringify(json, null, 2).slice(0, 800));
 
 
 npm run format && npm run lint && npm test
+
+
+
+mkdir -p ~/backups && nano ~/backup-db.sh
+
+
+#!/bin/bash
+# Nightly Postgres -> S3 backup. Keeps 14 days locally + everything in S3.
+set -e
+STAMP=$(date +%F)
+FILE=~/backups/huevix_$STAMP.sql.gz
+pg_dump -h localhost -U huevix huevix | gzip > "$FILE"
+aws s3 cp "$FILE" s3://huevix-app-prod/db-backups/huevix_$STAMP.sql.gz
+find ~/backups -name "huevix_*.sql.gz" -mtime +14 -delete
+echo "[backup] done $STAMP ($(du -h "$FILE" | cut -f1))"
+
+
+chmod +x ~/backup-db.sh
+./backup-db.sh          # run once NOW — verify a file lands in S3
+crontab -e              # add:
+30 21 * * * /home/ubuntu/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1

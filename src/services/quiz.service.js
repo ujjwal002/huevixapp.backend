@@ -3,6 +3,7 @@ import { generateQuizQuestions, QUIZ_QUESTION_COUNT } from './quizAi.service.js'
 import { isSubscriptionActive } from './entitlement.service.js';
 import { startOfUtcDay } from '../utils/dates.js';
 
+import { onQuizDayCompleted } from './referral.service.js';
 // =============================================================================
 // Quiz scoring + monthly leaderboard + single monthly winner.
 //
