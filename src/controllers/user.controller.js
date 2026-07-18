@@ -93,15 +93,18 @@ function urlToStorageKey(value) {
   return m ? m[0].replace(/^\//, '') : null;
 }
 
-// DELETE /users/me — permanently delete the account and all associated data.
-// Required by Google Play / Apple for any app with account creation. Removes:
-//   - the User row, which cascades to refresh tokens, completions, speaking
-//     attempts, saved cards, vocab progress, tutor sessions, device tokens,
-//     calls, blocks, reports, promos, and the subscription (schema relations
-//     are all onDelete: Cascade);
-//   - any future Razorpay autopay charges (cancelled first, best-effort);
-//   - the user's stored objects (speaking recordings, promo images), which a
-//     DB cascade does NOT touch.
+// The SAME androidpublisher client your /subscription/google/verify handler uses.
+// If you don't have a shared one yet:
+//   import { google } from 'googleapis';
+//   const auth = new google.auth.GoogleAuth({
+//     keyFile: process.env.PLAY_SERVICE_ACCOUNT_PATH, // play-service-account.json
+//     scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+//   });
+//   export const androidpublisher = google.androidpublisher({ version: 'v3', auth });
+// import { androidpublisher } from '../services/googlePlay.js';
+
+const PLAY_PACKAGE = 'com.huevix.app';
+
 export const deleteMe = asyncHandler(async (req, res) => {
   const { password, googleIdToken } = req.body;
 
@@ -120,6 +123,8 @@ export const deleteMe = asyncHandler(async (req, res) => {
         'GOOGLE_CONFIRM_REQUIRED'
       );
     }
+    // verifyGoogleIdToken must enforce audience = your WEB client id
+    // (reuse the exact verifier /auth/google login uses).
     const g = await verifyGoogleIdToken(googleIdToken);
     if (g.googleId !== req.user.googleId) {
       throw ApiError.unauthorized('Google account does not match', 'GOOGLE_MISMATCH');
@@ -139,10 +144,22 @@ export const deleteMe = asyncHandler(async (req, res) => {
     ...promos.map((p) => urlToStorageKey(p.imageUrl)), // stored as a public URL
   ].filter(Boolean);
 
-  // 2) Stop future autopay charges on Razorpay (best-effort; we still delete
-  //    locally even if the provider call fails).
-  if (req.user.subscription?.providerRefId) {
-    await cancelRecurringSubscription(req.user.subscription.providerRefId).catch(() => {});
+  // 2) Stop future GOOGLE PLAY renewals (best-effort; we still delete locally
+  //    even if the Play call fails). Without this, Google keeps billing a user
+  //    whose account no longer exists. Needs the purchaseToken + productId you
+  //    saved at /subscription/google/verify time.
+  const sub = req.user.subscription;
+  if (sub?.purchaseToken && sub?.productId) {
+    await androidpublisher.purchases.subscriptions
+      .cancel({
+        packageName: PLAY_PACKAGE,
+        subscriptionId: sub.productId, // 'premium_monthly' | 'premium_yearly'
+        token: sub.purchaseToken,
+      })
+      .catch(() => { });
+    // .cancel = stop renewal, no refund. To refund the remaining period
+    // instead, use purchases.subscriptionsv2.revoke with a prorated
+    // RevocationContext — revenue decision, not a requirement.
   }
 
   // 3) Delete the user. FK cascades remove every owned row atomically —

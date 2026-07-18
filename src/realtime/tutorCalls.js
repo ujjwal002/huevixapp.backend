@@ -95,15 +95,17 @@ async function ring(io, learnerSocket, tutorProfile, type, excluded) {
       learner: { id: learnerSocket.data.userId, name: learnerSocket.data.name },
     });
   }
-  if (!liveSockets.length) {
-    // App closed -> wake the phone. Tapping opens the app; the socket
-    // connects; deliverPendingInvites shows the incoming-call sheet.
-    pushToUser(tutorProfile.userId, {
-      title: '📞 Incoming tutor call',
-      body: `${learnerSocket.data.name || 'A learner'} wants a lesson — open Huevix to answer`,
-      data: { type: 'tutor_call', inviteId },
-    }).catch(() => {});
-  }
+  // ALWAYS ring by push too, not just when the app is closed. The common case
+  // is a BACKGROUNDED tutor whose socket is still alive: their frozen JS never
+  // shows the socket-only ring, and the invite dies as NO_ANSWER. The push
+  // reaches them regardless. Foregrounded tutors don't double-ring — the app
+  // suppresses the tutor_call banner while foregrounded (lib/push.ts), where
+  // the in-app incoming sheet is the ring.
+  pushToUser(tutorProfile.userId, {
+    title: '📞 Incoming tutor call',
+    body: `${learnerSocket.data.name || 'A learner'} wants a lesson — open Huevix to answer`,
+    data: { type: 'tutor_call', inviteId },
+  }).catch(() => { });
   learnerSocket.emit('tutor_ringing', {
     inviteId,
     type,

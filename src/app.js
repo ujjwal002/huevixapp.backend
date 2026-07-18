@@ -13,6 +13,8 @@ import { STORAGE_ROOT } from './services/storage.service.js';
 
 import { servePrivacy } from './privacy.js';
 
+import { serveTerms } from './terms.js';
+
 import { serveDeleteAccount } from './deleteAccount.js';
 
 import path from 'node:path';
@@ -133,6 +135,8 @@ const staticPageCsp = (_req, res, next) => {
 };
 app.get('/privacy', staticPageCsp, servePrivacy);
 app.get('/delete-account', staticPageCsp, serveDeleteAccount);
+// app.get('/delete-account', staticPageCsp, serveDeleteAccount);
+app.get('/terms', staticPageCsp, serveTerms);
 // Admin metrics dashboard (page + its two local scripts; DATA endpoint requires admin JWT)
 app.get('/admin', (_req, res) => res.sendFile(path.join(__appDir, 'admin', 'dashboard.html')));
 app.get('/admin/dashboard.js', (_req, res) => res.sendFile(path.join(__appDir, 'admin', 'dashboard.js')));
