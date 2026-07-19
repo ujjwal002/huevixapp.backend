@@ -88,6 +88,8 @@ model User {
   notificationsReadAt DateTime?
   savedCards          SavedCard[]
 
+  eligibilityProfile EligibilityProfile?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -942,4 +944,155 @@ model VoiceTtsCache {
   url       String
   seconds   Int      @default(1)
   createdAt DateTime @default(now())
+}
+
+
+// ---------------------------------------------------------------------------
+// Government Jobs — eligibility & fee engine
+// Design principle: RULES ARE DATA, NOT CODE. A job's eligibility criteria and
+// fee concessions live as validated JSON on the row; the pure engine in
+// src/services/eligibility.service.js evaluates them against a user's
+// EligibilityProfile. Adding a new organisation or an odd relaxation pattern
+// is a content change, never a schema/code change.
+// ---------------------------------------------------------------------------
+
+enum ReservationCategory {
+  UR // Unreserved / General
+  EWS
+  OBC // Central OBC-NCL; also Bihar "BC"
+  EBC // Bihar Extremely Backward Class — distinct from OBC, different relaxations
+  SC
+  ST
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum EducationLevel {
+  BELOW_TENTH
+  TENTH
+  ITI // often 12th-equivalent, but only when a notification says so (engine → VERIFY)
+  TWELFTH
+  DIPLOMA
+  GRADUATE
+  POST_GRADUATE
+  DOCTORATE
+}
+
+// One per user, filled once (7 questions), then every job check is instant.
+// Kept as a 1:1 satellite instead of columns on User: this vertical is
+// optional, and User is already carrying a lot.
+model EligibilityProfile {
+  userId            String               @id
+  dob               DateTime?            @db.Date
+  gender            Gender?
+  category          ReservationCategory?
+  domicileState     String? // "BR", "HR", "UP", … (ISO-style state codes)
+  isPwd             Boolean              @default(false)
+  isExServiceman    Boolean              @default(false)
+  educationLevel    EducationLevel?
+  educationSubjects String[]             @default([])
+  educationPercent  Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// The source registry — the 25 official recruitment bodies the crawler watches.
+model GovJobSource {
+  id              String  @id @default(uuid())
+  name            String
+  shortName       String  @unique // "SSC", "BPSC", "HSSC" — stable key for the crawler
+  url             String
+  state           String? // null = central / all-India
+  crawlEveryHours Int     @default(6)
+  requiresCet     Boolean @default(false) // Haryana CET model (HSSC)
+  notes           String?
+  active          Boolean @default(true)
+
+  jobs      GovJob[]
+  createdAt DateTime @default(now())
+}
+
+model GovJob {
+  id             String  @id @default(uuid())
+  sourceId       String?
+  title          String // "Bihar Police Constable Recruitment 2026"
+  organization   String // "CSBC" — denormalised for display even if sourceId is null
+  advtNo         String?
+  state          String? // null = all-India
+  totalVacancies Int?
+
+  // Status (OPEN/UPCOMING/CLOSED) is DERIVED from these at read time — nothing
+  // stored that can go stale. applyEndDate null = "open till further notice".
+  applyStartDate DateTime? @db.Date
+  applyEndDate   DateTime? @db.Date
+  examDate       DateTime? @db.Date
+
+  officialUrl        String?
+  notificationPdfUrl String?
+
+  // Validated JSON (shape enforced by src/validators/govJobs.schemas.js):
+  // eligibility: { genderAllowed, domicile, education, age{relaxations[]}, extras[] }
+  // feeRules:    { currency, default, rules[] (first match wins), coveredBy? }
+  eligibility Json
+  feeRules    Json
+
+  // Haryana CET: a post-advertisement links to its parent CET cycle.
+  requiresCet Boolean @default(false)
+  parentJobId String?
+
+  // Human-review gate: crawler/LLM-extracted jobs start unverified; the public
+  // list only shows verified rows. One wrong last-date kills user trust.
+  verified Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  source GovJobSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([applyEndDate])
+  @@index([state, applyEndDate])
+  @@index([verified, applyEndDate])
+}
+
+
+// ---------------------------------------------------------------------------
+// Government Jobs — crawler bookkeeping
+// ---------------------------------------------------------------------------
+
+enum CrawlItemStatus {
+  NEW // discovered, not yet extracted
+  EXTRACTED // GovJob created (verified:false) — see jobId
+  FAILED // fetch/OCR/LLM/validation error — see error
+  IGNORED // admin marked as not-a-job (result page, admit card, etc.)
+}
+
+model GovCrawlPage {
+  sourceId      String    @id
+  contentHash   String
+  lastCrawledAt DateTime
+  lastChangedAt DateTime?
+  lastError     String?
+}
+
+model GovCrawlItem {
+  id       String          @id @default(uuid())
+  sourceId String
+  url      String
+  title    String?
+  status   CrawlItemStatus @default(NEW)
+  jobId    String?
+  error    String?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime
+
+  @@unique([sourceId, url])
+  @@index([status, firstSeenAt])
 }

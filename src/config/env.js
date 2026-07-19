@@ -363,3 +363,4 @@ if (!config.mockExternal) {
         : 'mock';
   console.log(`[tts] tutor voice provider: ${ttsProvider}`);
 }
+console.log('[boot] sarvam key tail:', (config.sarvam.apiKey || 'MISSING').slice(-6));

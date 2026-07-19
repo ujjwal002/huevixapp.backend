@@ -12,13 +12,32 @@ export function estimateSpeechSeconds(text) {
   return Math.max(1, Math.round((text || '').length / 15));
 }
 
+// Sarvam validates the DECLARED content-type against an allowlist, then
+// auto-detects the real codec from the bytes (their docs: WAV, MP3, AAC,
+// MP4/M4A, AMR, WebM... all supported). Android recordings arrive as m4a,
+// but the colloquial label "audio/m4a" is NOT in the allowlist — the correct
+// IANA label for .m4a is audio/mp4, which is. Normalize the LABEL here so
+// every client build, past and future, passes validation; never touch bytes.
+function sarvamMime(mimetype = '', filename = '') {
+  const mt = String(mimetype).toLowerCase();
+  const fn = String(filename).toLowerCase();
+  if (mt.includes('m4a') || mt === 'audio/mp4' || fn.endsWith('.m4a') || fn.endsWith('.mp4')) {
+    return { type: 'audio/mp4', name: 'turn.mp4' };
+  }
+  if (mt.includes('wav') || fn.endsWith('.wav')) return { type: 'audio/wav', name: 'turn.wav' };
+  if (mt.includes('mpeg') || mt.includes('mp3') || fn.endsWith('.mp3')) return { type: 'audio/mp3', name: 'turn.mp3' };
+  if (mt.includes('aac') || fn.endsWith('.aac')) return { type: 'audio/aac', name: 'turn.aac' };
+  return { type: 'audio/wav', name: 'turn.wav' }; // proven-safe: label passes, codec auto-detected
+}
+
 // --- Speech to text (Saaras v3) ---
 export async function transcribe(audioBuffer, { filename = 'turn.m4a', mimetype = 'audio/m4a' } = {}) {
   if (config.mockExternal || !config.sarvam.apiKey) {
     return { text: '(mock) I go to market yesterday for buy vegetable.' };
   }
+  const norm = sarvamMime(mimetype, filename);
   const form = new FormData();
-  form.append('file', new Blob([audioBuffer], { type: mimetype }), filename);
+  form.append('file', new Blob([audioBuffer], { type: norm.type }), norm.name);
   form.append('model', config.sarvam.sttModel);
   form.append('mode', 'transcribe');
   if (config.sarvam.langCode) form.append('language_code', config.sarvam.langCode);

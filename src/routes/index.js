@@ -37,6 +37,8 @@ import { SUPPORTED_LANGUAGES, SUPPORTED_NATIVE_LANGUAGES, config } from '../conf
 import referralRoutes from './referral.routes.js';
 
 import voiceRoutes from './voice.routes.js';
+
+import govJobsRoutes from './govJobs.routes.js';
 const router = Router();
 
 // Liveness + readiness. Pings the database so an orchestrator probe won't route
@@ -113,6 +115,8 @@ router.use('/referrals', referralRoutes);
 router.use('/voice', voiceRoutes);
 
 router.use('/admin', metricsRoutes);
+
+// router.use('/gov-jobs', govJobsRoutes);
 
 // Google Play: one-time credit packs (authed)
 const purchasesRouter = Router();

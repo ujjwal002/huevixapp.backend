@@ -17,6 +17,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "node prisma/seed.js",
+    "seed:gov": "node prisma/seed-gov-sources.js",
     "prune:recordings": "node scripts/prune-recordings.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -47,7 +48,9 @@
     "multer": "^2.0.1",
     "nodemailer": "^9.0.3",
     "openai": "^6.42.0",
+    "pdfjs-dist": "^4.10.38",
     "socket.io": "^4.8.3",
+    "undici": "^8.7.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
