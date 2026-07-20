@@ -178,9 +178,10 @@ function validate(items) {
   return cleaned.length >= MIN_ACCEPTABLE ? cleaned : null;
 }
 
-// EDIT THIS to change the quiz subject.
-const PROMPT = `Generate ${REQUEST_COUNT} multiple-choice quiz questions for a daily general-knowledge quiz app.
-Mix general knowledge, basic science, simple math/reasoning, geography, and history. Easy to medium difficulty.
+// Generic fallback prompt — used only when NO news cards were published in the
+// last 24h (fresh install / provider down), so the daily quiz is never empty.
+const GENERIC_PROMPT = `Generate ${REQUEST_COUNT} multiple-choice quiz questions for a daily general-knowledge quiz aimed at Indian competitive-exam aspirants (UPSC / SSC / Banking style).
+Mix Indian polity, economy, geography, history, basic science, and static GK. Easy to medium difficulty.
 Each question must have EXACTLY 4 options and exactly one correct answer.
 
 Return STRICT JSON only, no markdown:
@@ -191,43 +192,93 @@ Return STRICT JSON only, no markdown:
 }
 Make wrong options plausible. correctIndex is 0-based (0-3).`;
 
-export async function generateQuizQuestions(_opts = {}) {
-  if (config.mockExternal || !config.ai.apiKey) return mockQuestions();
+// Build a quiz prompt from the last 24h of published cards, so the daily quiz
+// tests exactly what users just read (classic "daily current-affairs quiz").
+function currentAffairsPrompt(cards) {
+  const stories = cards
+    .map((c, i) => {
+      const facts = (c.keyPoints || '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join('; ');
+      const body = (c.body || '').replace(/\s+/g, ' ').slice(0, 220);
+      return `${i + 1}. [${c.topic || 'national'}] ${c.title} — ${body}${facts ? ` | Key facts: ${facts}` : ''}`;
+    })
+    .join('\n');
+
+  return `Generate ${REQUEST_COUNT} multiple-choice questions for a DAILY CURRENT-AFFAIRS quiz for Indian competitive-exam aspirants (UPSC / SSC / Banking / Railways style).
+
+Base every question ONLY on the news stories below. Do not use outside knowledge and do not invent facts, numbers or dates. Spread the questions across as many different stories as possible.
+
+Today's stories:
+${stories}
+
+Each question must have EXACTLY 4 options and exactly one correct answer.
+
+Return STRICT JSON only, no markdown:
+{
+  "questions": [
+    { "prompt": "the question", "options": ["A","B","C","D"], "correctIndex": 0, "explanation": "one short sentence" }
+  ]
+}
+Make wrong options plausible. correctIndex is 0-based (0-3).`;
+}
+
+async function askModel(prompt) {
+  const { default: OpenAI } = await import('openai');
+  const client = new OpenAI({
+    apiKey: config.ai.apiKey,
+    timeout: QUIZ_GEN_TIMEOUT_MS,
+    maxRetries: 2,
+  });
+  const completion = await withTimeout(
+    client.chat.completions.create({
+      model: config.ai.model,
+      max_tokens: 4096,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: 'You write quiz questions. Reply with strict JSON only, no markdown.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    }),
+    { label: 'quiz generation', ms: QUIZ_GEN_TIMEOUT_MS }
+  );
+  const txt = completion.choices?.[0]?.message?.content || '{}';
+  let parsed;
   try {
-    const { default: OpenAI } = await import('openai');
-    const client = new OpenAI({
-      apiKey: config.ai.apiKey,
-      timeout: QUIZ_GEN_TIMEOUT_MS,
-      maxRetries: 2,
-    });
-    const completion = await withTimeout(
-      client.chat.completions.create({
-        model: config.ai.model,
-        max_tokens: 4096,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: 'You write quiz questions. Reply with strict JSON only, no markdown.',
-          },
-          { role: 'user', content: PROMPT },
-        ],
-      }),
-      { label: 'quiz generation', ms: QUIZ_GEN_TIMEOUT_MS }
-    );
-    const txt = completion.choices?.[0]?.message?.content || '{}';
-    let parsed;
-    try {
-      parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
-    } catch {
-      parsed = null;
-    }
-    const items = parsed?.questions || parsed?.items || parsed;
-    return validate(items) || mockQuestions();
-  } catch (err) {
-    console.error('[quizAi] generation failed, using fallback:', err.message);
-    return mockQuestions();
+    parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
+  } catch {
+    parsed = null;
   }
+  return parsed?.questions || parsed?.items || parsed;
+}
+
+// opts.newsCards: [{ title, body, keyPoints, topic }] from the last 24h.
+// Attempt order: current-affairs prompt (if cards exist) → generic GK prompt →
+// deterministic mock. Each stage only runs if the previous produced too few
+// valid questions, so the daily quiz can never be empty.
+export async function generateQuizQuestions(opts = {}) {
+  const { newsCards } = opts;
+  if (config.mockExternal || !config.ai.apiKey) return mockQuestions();
+
+  const prompts = [];
+  if (Array.isArray(newsCards) && newsCards.length) prompts.push(currentAffairsPrompt(newsCards));
+  prompts.push(GENERIC_PROMPT);
+
+  for (const prompt of prompts) {
+    try {
+      const valid = validate(await askModel(prompt));
+      if (valid) return valid;
+      console.error('[quizAi] too few valid questions, trying next prompt');
+    } catch (err) {
+      console.error('[quizAi] generation failed, trying next prompt:', err.message);
+    }
+  }
+  return mockQuestions();
 }
 
 export const QUIZ_QUESTION_COUNT = TOTAL;

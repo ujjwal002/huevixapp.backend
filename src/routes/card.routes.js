@@ -31,6 +31,10 @@ const upload = multer({
 // --- Public reading (works with or without login) ---
 router.get('/feed', optionalAuth, validate(feedQuerySchema), card.getFeed);
 
+// Category tab bar for the app (current-affairs categories + counts).
+// MUST come before '/:id', or it gets captured as an id — same as '/saved'.
+router.get('/topics', optionalAuth, card.getTopics);
+
 // '/saved' MUST come before '/:id', or it gets captured as an id.
 router.get('/saved', requireAuth, validate(savedCardsQuerySchema), card.listSavedCards);
 

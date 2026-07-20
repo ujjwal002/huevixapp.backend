@@ -19,6 +19,16 @@ function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
+// Card.keyPoints is stored newline-separated; the API always returns string[]
+// (renders as bullet "Exam pointers" under the body in the app).
+function splitKeyPoints(s) {
+  if (!s) return [];
+  return s
+    .split('\n')
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
 // GET /cards/feed — the Inshorts-style daily feed for the user's target language.
 // Logged-in users see UNSEEN cards first, then SEEN ones as a fallback so the
 // feed is never empty (a card becomes "seen" via POST /cards/:id/seen). Guests
@@ -27,6 +37,7 @@ const FEED_CARD_SELECT = {
   id: true,
   title: true,
   body: true,
+  keyPoints: true,
   level: true,
   topic: true,
   targetLanguage: true,
@@ -50,12 +61,15 @@ function clampLimit(raw) {
 export const getFeed = asyncHandler(async (req, res) => {
   const limit = clampLimit(req.query.limit);
   const cursor = req.query.cursor || null;
-  const { level } = req.query;
+  const { level, topic } = req.query;
 
   const where = {
     targetLanguage: req.user?.targetLanguage || 'en',
     isPublished: true,
     ...(level ? { level } : {}),
+    // Current-affairs category filter (?topic=polity) — values come from
+    // GET /cards/topics, which the app uses to build its tab bar.
+    ...(topic ? { topic } : {}),
   };
   // Stable, unique ordering is required for cursor paging (id breaks createdAt ties).
   const orderBy = [{ createdAt: 'desc' }, { id: 'desc' }];
@@ -75,7 +89,12 @@ export const getFeed = asyncHandler(async (req, res) => {
   // Guests: no per-user state.
   if (!req.user) {
     return res.json({
-      items: rows.map((c) => ({ ...c, progress: null, saved: false })),
+      items: rows.map((c) => ({
+        ...c,
+        keyPoints: splitKeyPoints(c.keyPoints),
+        progress: null,
+        saved: false,
+      })),
       nextCursor,
     });
   }
@@ -99,6 +118,7 @@ export const getFeed = asyncHandler(async (req, res) => {
   res.json({
     items: rows.map((c) => ({
       ...c,
+      keyPoints: splitKeyPoints(c.keyPoints),
       progress: seenMap.get(c.id) || null,
       saved: savedSet.has(c.id),
     })),
@@ -106,24 +126,70 @@ export const getFeed = asyncHandler(async (req, res) => {
   });
 });
 
-// GET /cards/:id — full card with vocab in the user's native language.
+// GET /cards/topics — the app builds its category tab bar from this:
+// published-card counts per current-affairs category, biggest first.
+export const getTopics = asyncHandler(async (req, res) => {
+  const groups = await prisma.card.groupBy({
+    by: ['topic'],
+    where: {
+      isPublished: true,
+      topic: { not: null },
+      targetLanguage: req.user?.targetLanguage || 'en',
+    },
+    _count: { _all: true },
+  });
+  const topics = groups
+    .map((g) => ({ topic: g.topic, count: g._count._all }))
+    .sort((a, b) => b.count - a.count || a.topic.localeCompare(b.topic));
+  res.json({ topics });
+});
+
+// GET /cards/:id — full card with vocab (key terms).
 export const getCard = asyncHandler(async (req, res) => {
   const card = await prisma.card.findUnique({
     where: { id: req.params.id },
     include: {
       vocab: {
-        where: { nativeLanguage: req.user?.nativeLanguage || 'hi' },
-        select: { term: true, partOfSpeech: true, meaning: true, example: true },
+        select: {
+          nativeLanguage: true,
+          term: true,
+          partOfSpeech: true,
+          meaning: true,
+          example: true,
+        },
       },
       ...(req.user ? { savedBy: { where: { userId: req.user.id }, select: { id: true } } } : {}),
     },
   });
   if (!card || !card.isPublished) throw ApiError.notFound('Card not found');
 
+  // Key terms are language-agnostic on current-affairs cards, but the schema
+  // supports per-native-language glossaries (legacy learning cards). Serve the
+  // user's language when entries exist for it; otherwise FALL BACK to whatever
+  // the card has — news key terms are stored under 'hi', which used to make
+  // them invisible to every account with a different profile language.
+  const lang = req.user?.nativeLanguage || 'hi';
+  const inLang = card.vocab.filter((v) => v.nativeLanguage === lang);
+  const pool = inLang.length ? inLang : card.vocab;
+  const seenTerms = new Set();
+  const vocab = [];
+  for (const row of pool) {
+    const key = row.term.toLowerCase();
+    if (seenTerms.has(key)) continue; // dedupe across languages in the fallback
+    seenTerms.add(key);
+    vocab.push({
+      term: row.term,
+      partOfSpeech: row.partOfSpeech,
+      meaning: row.meaning,
+      example: row.example,
+    });
+  }
+
   res.json({
     id: card.id,
     title: card.title,
     body: card.body,
+    keyPoints: splitKeyPoints(card.keyPoints),
     level: card.level,
     topic: card.topic,
     targetLanguage: card.targetLanguage,
@@ -131,7 +197,7 @@ export const getCard = asyncHandler(async (req, res) => {
     audioStatus: card.audioStatus,
     wordCount: card.wordCount,
     saved: req.user ? (card.savedBy?.length || 0) > 0 : false,
-    vocab: card.vocab, // meanings already in the user's native language
+    vocab, // user's language when available, else the card's own glossary
     imageUrl: card.imageUrl,
     sourceUrl: card.sourceUrl,
   });
@@ -437,6 +503,7 @@ export const listSavedCards = asyncHandler(async (req, res) => {
           id: true,
           title: true,
           body: true,
+          keyPoints: true,
           level: true,
           topic: true,
           targetLanguage: true,
@@ -457,7 +524,12 @@ export const listSavedCards = asyncHandler(async (req, res) => {
   }
 
   res.json({
-    items: saved.map((s) => ({ ...s.card, saved: true, savedAt: s.createdAt })),
+    items: saved.map((s) => ({
+      ...s.card,
+      keyPoints: splitKeyPoints(s.card.keyPoints),
+      saved: true,
+      savedAt: s.createdAt,
+    })),
     nextCursor,
   });
 });

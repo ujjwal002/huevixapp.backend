@@ -182,6 +182,7 @@ model Card {
   topic          String? // e.g. "interview", "daily life", "travel"
   title          String
   body           String // the short text (~60-120 words)
+  keyPoints      String? // 3-5 exam pointers, newline-separated (API returns string[])
   wordCount      Int         @default(0)
   audioUrl       String? // cached TTS output (listening feature)
   audioStatus    AudioStatus @default(PENDING)
@@ -203,7 +204,6 @@ model Card {
 
   @@index([targetLanguage, level, isPublished])
 }
-
 model SavedCard {
   id        String   @id @default(uuid())
   userId    String

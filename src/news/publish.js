@@ -7,6 +7,7 @@ import { prisma } from '../db/prisma.js';
 import { getActiveProvider } from './registry.js';
 import { summarizeArticle } from './summarize.js';
 import { isAppropriate } from './filter.js';
+import { normalizeCategory } from './categories.js';
 import { synthesizeSpeech } from '../services/tts.service.js';
 import { saveImageFromUrl } from '../services/storage.service.js';
 
@@ -103,9 +104,13 @@ export async function runNewsBatch(opts = {}) {
       const card = await prisma.card.create({
         data: {
           targetLanguage,
-          topic: article.category || 'news',
+          // Canonical exam category: prefer the AI's pick, fall back to the raw
+          // provider category — both are normalized onto CA_CATEGORIES.
+          topic: normalizeCategory(summary.topic || article.category),
           title: summary.title,
           body: summary.body,
+          // 3-5 exam pointers, stored newline-separated (API returns string[]).
+          keyPoints: summary.keyPoints?.length ? summary.keyPoints.join('\n') : null,
           wordCount: countWords(summary.body),
           isPublished: publish,
           imageUrl,

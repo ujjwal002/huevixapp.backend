@@ -156,6 +156,8 @@ export const deleteMeSchema = {
 export const feedQuerySchema = {
   query: z.object({
     level: levelEnum.optional(),
+    // Current-affairs category filter; values come from GET /cards/topics.
+    topic: z.string().trim().toLowerCase().min(1).max(40).optional(),
     cursor: z.string().uuid().optional(),
     limit: z.coerce.number().int().min(1).max(20).default(10),
   }),

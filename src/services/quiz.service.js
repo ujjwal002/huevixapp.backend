@@ -45,7 +45,21 @@ export async function getOrCreateTodayQuiz(targetLanguage = 'en') {
   });
   if (existing) return existing;
 
-  const generated = await generateQuizQuestions({ targetLanguage });
+  // Current-affairs mode: today's quiz is built FROM the last 24h of published
+  // cards, so it tests exactly what users just read — and questions don't
+  // repeat across days (a wider window would re-use yesterday's stories). If
+  // nothing was published (fresh install / provider down) the generator falls
+  // back to a generic GK prompt, and finally to the built-in mock set — the
+  // quiz can never be empty.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const newsCards = await prisma.card.findMany({
+    where: { isPublished: true, targetLanguage, createdAt: { gte: since } },
+    orderBy: { createdAt: 'desc' },
+    take: 40,
+    select: { title: true, body: true, keyPoints: true, topic: true },
+  });
+
+  const generated = await generateQuizQuestions({ targetLanguage, newsCards });
   try {
     return await prisma.dailyQuiz.create({
       data: {

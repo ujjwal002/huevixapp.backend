@@ -20,18 +20,66 @@ async function main() {
   const notify = !hasFlag('no-notify');
   const dry = hasFlag('dry');
   const limit = Number(arg('limit', process.env.NEWS_BATCH_LIMIT || 7));
+  // World slice: international affairs (summits, global orgs, conflicts, IR)
+  // are a scoring area in Indian competitive exams, and a pure country=in
+  // fetch can miss them. Default ~1/3 of the batch goes to a global fetch;
+  // override with NEWS_WORLD_LIMIT or --world-limit (0 disables).
+  const worldLimit = Math.min(
+    limit,
+    Math.max(
+      0,
+      Number(arg('world-limit', process.env.NEWS_WORLD_LIMIT ?? Math.max(1, Math.round(limit / 3))))
+    )
+  );
+  const indiaLimit = limit - worldLimit;
 
   console.log('[news] providers:', JSON.stringify(listProviders()));
+  console.log(`[news] batch split: india=${indiaLimit} world=${worldLimit}`);
   if (dry) console.log('[news] DRY RUN — will not publish');
 
-  const result = await runNewsBatch({
-    limit,
-    categories: process.env.NEWS_CATEGORIES,
-    country: process.env.NEWS_COUNTRY,
-    language: process.env.NEWS_LANGUAGE || 'en',
-    targetLanguage: 'en',
-    publish: !dry,
-  });
+  const batches = [];
+  if (indiaLimit > 0) {
+    batches.push(
+      await runNewsBatch({
+        limit: indiaLimit,
+        // Current-affairs defaults: Indian news across the exam-relevant source
+        // categories. Override with NEWS_CATEGORIES / NEWS_COUNTRY.
+        categories:
+          process.env.NEWS_CATEGORIES || 'politics,business,science,technology,world,sports',
+        country: process.env.NEWS_COUNTRY || 'in',
+        language: process.env.NEWS_LANGUAGE || 'en',
+        targetLanguage: 'en',
+        publish: !dry,
+      })
+    );
+  }
+  if (worldLimit > 0) {
+    batches.push(
+      await runNewsBatch({
+        limit: worldLimit,
+        // Global fetch — deliberately NOT restricted to India. The summarizer
+        // normalizes these onto the 'international' category.
+        categories: process.env.NEWS_WORLD_CATEGORIES || 'world,politics',
+        country: undefined,
+        language: process.env.NEWS_LANGUAGE || 'en',
+        targetLanguage: 'en',
+        publish: !dry,
+      })
+    );
+  }
+
+  // Merge the slices for logging + the single batch push.
+  const result = batches.reduce(
+    (acc, r) => ({
+      provider: r.provider || acc.provider,
+      fetched: acc.fetched + r.fetched,
+      published: acc.published + r.published,
+      skipped: acc.skipped + r.skipped,
+      filtered: acc.filtered + r.filtered,
+      titles: [...acc.titles, ...r.titles],
+    }),
+    { provider: null, fetched: 0, published: 0, skipped: 0, filtered: 0, titles: [] }
+  );
 
   console.log(
     `[news] provider=${result.provider} fetched=${result.fetched} published=${result.published} skipped=${result.skipped}`
@@ -40,12 +88,13 @@ async function main() {
 
   if (notify && !dry && result.published > 0) {
     const n = result.published;
+    const appName = process.env.APP_NAME || 'Huevix';
     await pushToAll({
-      title: n === 1 ? 'New story on Huevix' : `${n} new stories on Huevix`,
+      title: n === 1 ? `New current affairs on ${appName}` : `${n} new current affairs on ${appName}`,
       body:
         n === 1
           ? result.titles[0]
-          : `Fresh reads are in — ${result.titles.slice(0, 2).join(' · ')}${n > 2 ? ' and more' : ''}`,
+          : `Today's updates — ${result.titles.slice(0, 2).join(' · ')}${n > 2 ? ' and more' : ''}`,
       data: { type: 'NEWS_BATCH' },
     });
     console.log(`[news] pushed 1 batch notification for ${n} stories`);
