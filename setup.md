@@ -17,6 +17,8 @@ node prisma/seed-sponsored.js
 npx prisma db push
 pm2 restart huevix-backend
 
+pm2 start npm --name huevix-backend -- start
+
 k6 run load-test.js
 
 
