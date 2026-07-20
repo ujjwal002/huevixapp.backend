@@ -77,8 +77,9 @@ async function main() {
       skipped: acc.skipped + r.skipped,
       filtered: acc.filtered + r.filtered,
       titles: [...acc.titles, ...r.titles],
+      cards: [...acc.cards, ...(r.cards || [])],
     }),
-    { provider: null, fetched: 0, published: 0, skipped: 0, filtered: 0, titles: [] }
+    { provider: null, fetched: 0, published: 0, skipped: 0, filtered: 0, titles: [], cards: [] }
   );
 
   console.log(
@@ -86,18 +87,32 @@ async function main() {
   );
   result.titles.forEach((t) => console.log('   •', t));
 
-  if (notify && !dry && result.published > 0) {
-    const n = result.published;
-    const appName = process.env.APP_NAME || 'Huevix';
-    await pushToAll({
-      title: n === 1 ? `New current affairs on ${appName}` : `${n} new current affairs on ${appName}`,
-      body:
-        n === 1
-          ? result.titles[0]
-          : `Today's updates — ${result.titles.slice(0, 2).join(' · ')}${n > 2 ? ' and more' : ''}`,
-      data: { type: 'NEWS_BATCH' },
-    });
-    console.log(`[news] pushed 1 batch notification for ${n} stories`);
+  if (notify && !dry && result.cards.length > 0) {
+    // ONE notification PER article (Inshorts-style): each headline is its own
+    // reason to open the app, and each tap deep-links to that exact story via
+    // the app's NEW_CARD route. Sent one by one with a gap — a burst of 7 at
+    // once reads as spam and gets the app muted or uninstalled.
+    //   NEWS_NOTIFY_GAP_SECONDS  gap between notifications (default 120)
+    //   NEWS_NOTIFY_LIMIT        max per batch, 0 = all (default 0)
+    const gapMs = Math.max(5, Number(process.env.NEWS_NOTIFY_GAP_SECONDS) || 120) * 1000;
+    const cap = Math.max(0, Number(process.env.NEWS_NOTIFY_LIMIT) || 0);
+    const toNotify = cap > 0 ? result.cards.slice(0, cap) : result.cards;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    console.log(`[news] notifying ${toNotify.length} article(s), one every ${gapMs / 1000}s`);
+    for (let i = 0; i < toNotify.length; i++) {
+      const c = toNotify[i];
+      // Body = the first exam pointer (a short, concrete fact) — the best
+      // hook we have. Falls back to a simple tap prompt for fallback cards.
+      const firstPoint = (c.keyPoints || '').split('\n').map((s) => s.trim()).filter(Boolean)[0];
+      await pushToAll({
+        title: c.title,
+        body: firstPoint || 'Tap to read today\u2019s update',
+        data: { type: 'NEW_CARD', cardId: c.id },
+      });
+      console.log(`[news] notified ${i + 1}/${toNotify.length}: ${c.title}`);
+      if (i < toNotify.length - 1) await sleep(gapMs);
+    }
   }
 
   await prisma.$disconnect();

@@ -37,6 +37,15 @@ export function periodOf(date = new Date()) {
 // Get or lazily create today's quiz for a language. The AI call happens OUTSIDE
 // any transaction; the unique([date,targetLanguage]) constraint makes two
 // concurrent first-requests safe (one creates, the other reads).
+//
+// Concurrent first-open requests additionally SHARE one in-flight generation
+// per (day, language): without this, every simultaneous /quiz/today on a
+// fresh day ran its own slow, paid AI generation and then raced the create —
+// the losers were caught by the P2002 fallback below, but each still burned
+// an AI call and logged a scary prisma:error. Single process (pm2 fork) means
+// a Map is enough; the P2002 catch stays as the cross-process safety net.
+const inFlightQuiz = new Map();
+
 export async function getOrCreateTodayQuiz(targetLanguage = 'en') {
   const date = startOfUtcDay();
   const existing = await prisma.dailyQuiz.findUnique({
@@ -45,6 +54,19 @@ export async function getOrCreateTodayQuiz(targetLanguage = 'en') {
   });
   if (existing) return existing;
 
+  // Key includes the day so a request that lands exactly at UTC midnight
+  // never joins the previous day's in-flight generation.
+  const key = `${date.toISOString()}:${targetLanguage}`;
+  if (!inFlightQuiz.has(key)) {
+    inFlightQuiz.set(
+      key,
+      createTodayQuiz(date, targetLanguage).finally(() => inFlightQuiz.delete(key))
+    );
+  }
+  return inFlightQuiz.get(key);
+}
+
+async function createTodayQuiz(date, targetLanguage) {
   // Current-affairs mode: today's quiz is built FROM the last 24h of published
   // cards, so it tests exactly what users just read — and questions don't
   // repeat across days (a wider window would re-use yesterday's stories). If

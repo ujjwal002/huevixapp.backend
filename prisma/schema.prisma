@@ -204,6 +204,8 @@ model Card {
 
   @@index([targetLanguage, level, isPublished])
 }
+
+
 model SavedCard {
   id        String   @id @default(uuid())
   userId    String

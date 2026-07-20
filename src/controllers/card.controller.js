@@ -8,7 +8,8 @@ import { notifyNewCard } from '../services/notification.service.js';
 
 import { saveBuffer } from '../services/storage.service.js';
 
-import { summarizeArticle } from '../services/ai.service.js';
+import { summarizeArticle } from '../news/summarize.js';
+import { normalizeCategory } from '../news/categories.js';
 
 import { adminArticleVocabSchema } from '../validators/schemas.js';
 import { sniffImageExt } from '../utils/imageType.js';
@@ -17,6 +18,34 @@ import { config } from '../config/env.js';
 
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+// Admin input → stored keyPoints. Accepts a JSON array string or a
+// newline-separated string (the dashboard posts multipart form fields, so
+// everything arrives as a string). Trims bullets, caps at 5 × 160 chars.
+function parseKeyPoints(raw) {
+  if (!raw) return null;
+  let items = [];
+  if (Array.isArray(raw)) {
+    items = raw;
+  } else {
+    const s = String(raw).trim();
+    if (!s) return null;
+    if (s.startsWith('[')) {
+      try {
+        items = JSON.parse(s);
+      } catch {
+        items = [];
+      }
+    }
+    if (!Array.isArray(items) || !items.length) items = s.split('\n');
+  }
+  const clean = items
+    .map((p) => String(p).replace(/\s+/g, ' ').trim().replace(/^[-•*]\s*/, ''))
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((p) => p.slice(0, 160));
+  return clean.length ? clean.join('\n') : null;
 }
 
 // Card.keyPoints is stored newline-separated; the API always returns string[]
@@ -328,10 +357,13 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
       ? true
       : req.body.publish === true || req.body.publish === 'true';
 
+  // The current-affairs summarizer (same one the news cron uses) — produces
+  // the exam summary, canonical topic, keyPoints AND the learner vocab in one
+  // call, so admin articles are first-class citizens of the feed.
   const summarized = await summarizeArticle({
-    text: req.body.text,
-    targetLanguage,
-    nativeLanguage,
+    title: req.body.title?.trim() || 'Admin article',
+    description: req.body.text,
+    source: 'admin',
   });
   const title = (req.body.title && req.body.title.trim()) || summarized.title;
 
@@ -344,9 +376,12 @@ export const createArticleFromNews = asyncHandler(async (req, res) => {
     data: {
       targetLanguage,
       level,
-      topic: 'news',
+      // Admin override wins, else the AI's pick — both normalized onto the
+      // canonical categories so no stray tabs appear in the app.
+      topic: normalizeCategory(req.body.topic || summarized.topic),
       title,
       body: summarized.body,
+      keyPoints: summarized.keyPoints?.length ? summarized.keyPoints.join('\n') : null,
       wordCount: countWords(summarized.body),
       imageUrl,
       sourceUrl,
@@ -385,7 +420,7 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
   const targetLanguage = req.body.targetLanguage || 'en';
   const nativeLanguage = req.body.nativeLanguage || 'hi';
   const level = req.body.level || 'INTERMEDIATE';
-  const topic = req.body.topic?.trim() || 'article';
+  const topic = normalizeCategory(req.body.topic?.trim() || 'national');
   const sourceUrl = req.body.sourceUrl?.trim() || null;
   const publish =
     req.body.publish === undefined
@@ -418,6 +453,7 @@ export const createAdminArticle = asyncHandler(async (req, res) => {
       topic,
       title: req.body.title.trim(),
       body: req.body.body,
+      keyPoints: parseKeyPoints(req.body.keyPoints),
       wordCount: countWords(req.body.body),
       imageUrl,
       sourceUrl,

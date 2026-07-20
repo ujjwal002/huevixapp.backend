@@ -1,12 +1,13 @@
 /**
- * Summarize a raw news article into an exam-oriented CURRENT-AFFAIRS card.
+ * Summarize a raw news article into an exam-oriented CURRENT-AFFAIRS card
+ * that ALSO teaches English: alongside the summary we extract 3-5 memorizable
+ * "keyPoints" (exam pointers) AND a learner vocab glossary — the complex
+ * English words from the story with beginner-friendly meanings and examples,
+ * exactly like the original language-learning pipeline.
  *
  * COPYRIGHT: we NEVER republish the source's text. We take only the headline +
- * short description and rewrite a fresh summary in our own words, plus extract
- * 3-5 memorizable "keyPoints" (exam pointers) and a glossary of key terms
- * (abbreviations / organisations / schemes — reuses the vocab tables so the
- * existing glossary UI works untouched). If the AI is unavailable, we fall
- * back to a trimmed description with no keyPoints/vocab.
+ * short description and rewrite a fresh summary in our own words. If the AI is
+ * unavailable, we fall back to a trimmed description with no keyPoints/vocab.
  */
 import { config } from '../config/env.js';
 import { withTimeout } from '../utils/withTimeout.js';
@@ -21,7 +22,7 @@ function fallbackSummary(article) {
 }
 
 function buildPrompt(article) {
-  return `Turn this news item into an exam-oriented current-affairs card for Indian competitive exams (UPSC, SSC, Banking, Railways, state PCS). Write everything in your OWN words — do NOT copy the source text.
+  return `Turn this news item into a current-affairs card for Indian competitive-exam aspirants (UPSC, SSC, Banking, Railways, state PCS) who are ALSO improving their English. Write everything in your OWN words — do NOT copy the source text.
 
 Headline: ${article.title}
 Details: ${article.description || '(none)'}
@@ -29,14 +30,14 @@ Source: ${article.source || 'unknown'}
 
 Rules:
 - "title": factual headline, max 12 words, no clickbait.
-- "body": 55-75 words, neutral and factual — who/what/when/where and why it matters. Plain language, no opinion, no "click here".
+- "body": 55-75 words, neutral and factual — who/what/when/where and why it matters. Clear, readable English. No opinion, no "click here".
 - "topic": exactly ONE of: ${CA_CATEGORIES.join(', ')}. Pick the best fit.
 - "keyPoints": 3-5 short, memorizable exam facts from this story (names, numbers, dates, places, ranks). Each under 15 words — the pointers an aspirant would note down.
-- "vocab": 3-6 key terms that appear in the story — abbreviations, organisations, schemes, indexes or technical terms an aspirant should know. For each:
-    - "term": the term as written (e.g. "NITI Aayog", "FDI", "PM-KISAN")
-    - "partOfSpeech": one of "abbreviation", "organisation", "scheme", "index", "term"
-    - "meaning": one simple line explaining what it is
-    - "example": the full form or one line of context (may be empty)
+- "vocab": Pick the words in your body that a BEGINNER English learner would NOT know yet (aim for 5-8 words). For beginners, this includes intermediate everyday words like "scrutiny", "discrepancy", "hospitality", "commend", "respond", "attend", "reception", "protest" — not just rare words. Skip only the very basic words (the, is, and, go, day, new). For each word:
+    - "term": the word (as it appears)
+    - "partOfSpeech": noun/verb/adjective/adverb/etc.
+    - "meaning": a very simple, beginner-friendly definition (use easy words)
+    - "example": a short, simple example sentence using the word
 - Base everything ONLY on the given headline/details. Do not invent facts, numbers or dates.
 
 Return STRICT JSON only, no markdown:
@@ -63,6 +64,7 @@ function cleanKeyPoints(points) {
   return out;
 }
 
+// Same learner-vocab cleaner as the original pipeline.
 function cleanVocab(vocab) {
   if (!Array.isArray(vocab)) return [];
   const out = [];
@@ -75,7 +77,7 @@ function cleanVocab(vocab) {
     seen.add(key);
     out.push({
       term: v.term.trim(),
-      partOfSpeech: typeof v.partOfSpeech === 'string' && v.partOfSpeech.trim() ? v.partOfSpeech.trim() : 'term',
+      partOfSpeech: typeof v.partOfSpeech === 'string' && v.partOfSpeech.trim() ? v.partOfSpeech.trim() : 'word',
       meaning: v.meaning.trim(),
       example: typeof v.example === 'string' ? v.example.trim() : '',
     });
@@ -97,13 +99,13 @@ export async function summarizeArticle(article) {
     const completion = await withTimeout(
       client.chat.completions.create({
         model: config.ai.model,
-        max_tokens: 900,
+        max_tokens: 1000,
         response_format: { type: 'json_object' },
         messages: [
           {
             role: 'system',
             content:
-              'You are an editor for a daily current-affairs app used by Indian competitive-exam aspirants. Be factual and neutral, rewrite in your own words, and reply with strict JSON only.',
+              'You are an editor for a daily current-affairs app that also helps Indian users improve their English. Be factual and neutral, rewrite in your own words, and reply with strict JSON only.',
           },
           { role: 'user', content: buildPrompt(article) },
         ],

@@ -224,6 +224,8 @@ export const createArticleSchema = {
   body: z.object({
     text: z.string().min(40).max(20000),
     title: z.string().min(1).max(120).optional(),
+    // Optional current-affairs category override; normalized in the controller.
+    topic: z.string().max(60).optional(),
     level: levelEnum.optional(),
     targetLanguage: targetEnum.optional(),
     nativeLanguage: nativeEnum.optional(),
@@ -246,6 +248,9 @@ export const createAdminArticleSchema = {
     sourceUrl: z.string().max(500).optional(),
     publish: z.union([z.boolean(), z.string()]).optional(),
     vocab: z.string().max(10000).optional(), // JSON string; parsed in controller
+    // Exam pointers: JSON array string or newline-separated (multipart sends
+    // strings); parsed leniently in the controller, max 5 kept.
+    keyPoints: z.string().max(2000).optional(),
   }),
 };
 

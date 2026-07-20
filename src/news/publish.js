@@ -63,7 +63,7 @@ export async function runNewsBatch(opts = {}) {
   const provider = getActiveProvider();
   if (!provider) {
     console.error('[news] no provider configured (set NEWSDATA_API_KEY or NEWS_RSS_FEEDS)');
-    return { fetched: 0, published: 0, skipped: 0, filtered: 0, provider: null, titles: [] };
+    return { fetched: 0, published: 0, skipped: 0, filtered: 0, provider: null, titles: [], cards: [] };
   }
 
   const raw = await provider.fetch({ limit, categories, country, language });
@@ -75,6 +75,7 @@ export async function runNewsBatch(opts = {}) {
       filtered: 0,
       provider: provider.name,
       titles: [],
+      cards: [],
     };
   }
 
@@ -86,6 +87,9 @@ export async function runNewsBatch(opts = {}) {
   const filtered = notSeen.length - fresh.length;
 
   const publishedTitles = [];
+  // Per-card info for one-by-one push notifications (id enables the app's
+  // NEW_CARD deep link straight to that story).
+  const publishedCards = [];
   let skipped = raw.length - notSeen.length;
 
   for (const article of fresh) {
@@ -133,6 +137,7 @@ export async function runNewsBatch(opts = {}) {
       // Generate TTS audio just like manual/AI cards do.
       await generateAndAttachAudio(card.id, summary.body, targetLanguage);
       publishedTitles.push(card.title);
+      publishedCards.push({ id: card.id, title: card.title, topic: card.topic, keyPoints: card.keyPoints });
     } catch (e) {
       console.error('[news] failed to publish article:', article.url, e.message);
       skipped++;
@@ -146,5 +151,6 @@ export async function runNewsBatch(opts = {}) {
     filtered,
     provider: provider.name,
     titles: publishedTitles,
+    cards: publishedCards,
   };
 }
